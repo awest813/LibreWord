@@ -1,5 +1,5 @@
 {
-  "name": "JATE",
+  "name": "LibreWord",
   "scripts": {
     "dev": "webpack-dev-server",
     "build": "webpack --mode production",
@@ -25,8 +25,10 @@
     "workbox-webpack-plugin": "^6.2.4"
   },
   "dependencies": {
+    "file-saver": "^2.0.5",
     "html2pdf.js": "^0.14.0",
     "idb": "^6.1.2",
+    "mammoth": "^1.12.0",
     "quill": "^2.0.3"
   }
 }

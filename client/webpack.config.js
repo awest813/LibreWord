@@ -22,25 +22,24 @@ module.exports = () => {
       // Webpack plugin that generates our html file and injects our bundles. 
       new HtmlWebpackPlugin({
         template: './index.html',
-        title: 'JATE'
+        title: 'LibreWord'
       }),
      
       
       // Injects our custom service worker
-      // new InjectManifest({
-      //   swSrc: './src-sw.js',
-      //   swDest: 'src-sw.js',
-      // }),
-      new GenerateSW(),
+      new InjectManifest({
+        swSrc: './src-sw.js',
+        swDest: 'service-worker.js',
+      }),
       // Creates a manifest.json file.
       new WebpackPwaManifest({
         fingerprints: false,
         inject: true,
-        name: 'Just Another Text Editor',
-        short_name: 'J.A.T.E',
-        description: 'Add Text!',
-        background_color: '#225ca3',
-        theme_color: '#225ca3',
+        name: 'LibreWord Document System',
+        short_name: 'LibreWord',
+        description: 'Premium Progressive Web Word Processor',
+        background_color: '#0f172a',
+        theme_color: '#0f172a',
         start_url: './',
         publicPath: './',
         icons: [
@@ -50,8 +49,6 @@ module.exports = () => {
             destination: path.join('assets', 'icons'),
           },
         ],
-        start_url: "./",
-        publicPath:"./",
       }),
     ],
 
