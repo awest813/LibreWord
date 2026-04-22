@@ -1,42 +1,60 @@
-// Import methods to save and get data from the indexedDB database in './database.js'
-import { getDb, putDb } from './database';
-import { header } from './header';
+import { getDoc, updateDoc } from './database';
+import Quill from 'quill';
+import 'quill/dist/quill.bubble.css';
+import html2pdf from 'html2pdf.js';
 
 export default class {
-  constructor() {
-    const localData = localStorage.getItem('content');
+  constructor(docId) {
+    this.docId = docId;
+    
+    const container = document.createElement('div');
+    document.querySelector('#editor-container').appendChild(container);
 
-    // check if CodeMirror is loaded
-    if (typeof CodeMirror === 'undefined') {
-      throw new Error('CodeMirror is not loaded');
-    }
-
-    this.editor = CodeMirror(document.querySelector('#main'), {
-      value: '',
-      mode: 'javascript',
-      theme: 'monokai',
-      lineNumbers: true,
-      lineWrapping: true,
-      autofocus: true,
-      indentUnit: 2,
-      tabSize: 2,
+    this.editor = new Quill(container, {
+      theme: 'bubble',
+      placeholder: 'Start writing...',
+      modules: {
+        toolbar: [
+          ['bold', 'italic', 'underline', 'strike'],
+          [{ 'header': 1 }, { 'header': 2 }, { 'header': 3 }],
+          [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+          ['link', 'blockquote', 'code-block', 'image', 'video']
+        ]
+      }
     });
 
-    // When the editor is ready, set the value to whatever is stored in indexeddb.
-    // Fall back to localStorage if nothing is stored in indexeddb, and if neither is available, set the value to header.
-    getDb().then((data) => {
-      console.info('Loaded data from IndexedDB, injecting into editor');
-      this.editor.setValue(data || localData || header);
+    getDoc(this.docId).then((doc) => {
+      if (doc && doc.content) {
+        this.editor.clipboard.dangerouslyPasteHTML(doc.content);
+      }
     });
 
-    this.editor.on('change', () => {
-      localStorage.setItem('content', this.editor.getValue());
+    this.editor.on('text-change', () => {
+      // Autosave text
+      updateDoc(this.docId, undefined, this.editor.root.innerHTML);
     });
 
-    // Save the content of the editor when the editor itself is loses focus
-    this.editor.on('blur', () => {
-      console.log('The editor has lost focus');
-      putDb(localStorage.getItem('content'));
-    });
+    // Setup Print Button
+    document.getElementById('btn-print').onclick = () => {
+      window.print();
+    };
+
+    // Setup PDF Export Button
+    document.getElementById('btn-export-pdf').onclick = async () => {
+      const doc = await getDoc(this.docId);
+      const title = (doc && doc.title) ? doc.title : 'document';
+      
+      const element = document.querySelector('.ql-editor');
+      const opt = {
+        margin:       1,
+        filename:     `${title}.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2 },
+        jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
+      };
+
+      html2pdf().set(opt).from(element).save();
+    };
   }
 }
+

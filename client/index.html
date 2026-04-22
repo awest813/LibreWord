@@ -4,19 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>J.A.T.E</title>
-    
-      <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.52.2/codemirror.min.css">
-      </link>
-      <script type="text/javascript"
-        src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.52.2/codemirror.min.js">
-      </script>
-      <script type="text/javascript"
-        src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.52.2/mode/javascript/javascript.min.js">
-      </script>
-      <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.52.2/theme/monokai.min.css">
-      </link>
+
   </head>
   <body>
     <nav id="navbar">
@@ -31,8 +19,23 @@
     </nav>
 
     <main id="main">
-      <div class="loading-container">
-        <div class="loading-spinner"></div>
+      <div id="dashboard-view" class="view-container">
+         <div class="dashboard-header" style="display:flex; justify-content:space-between; align-items:center; padding: 20px;">
+           <h2 style="color: white;">My Documents</h2>
+           <button id="btn-new-doc" class="btn btn-sm btn-dark">New Document</button>
+         </div>
+         <div id="doc-list" class="doc-grid" style="padding: 20px; color: white;"></div>
+      </div>
+      <div id="editor-view" class="view-container" style="display: none;">
+         <div id="editor-header" style="display: flex; align-items: center; padding: 10px; background: #225ca3;">
+            <button id="btn-back" class="btn btn-sm btn-dark" style="margin-right: 15px;">&larr; Back</button>
+            <input type="text" id="doc-title" placeholder="Untitled Document" style="font-size: 1.2rem; border: none; outline: none; background: transparent; flex-grow: 1; color: white;" />
+            <div id="editor-actions">
+              <button id="btn-print" class="btn btn-sm btn-light" style="margin-right: 10px;">Print</button>
+              <button id="btn-export-pdf" class="btn btn-sm btn-light">Export PDF</button>
+            </div>
+         </div>
+         <div id="editor-container" style="background: white; min-height: 80vh; padding: 20px;"></div>
       </div>
     </main>
     

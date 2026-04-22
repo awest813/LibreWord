@@ -209,3 +209,40 @@ h1 {
     font-size: 18px;
   }
 }
+
+/* Page Layout View */
+#editor-container {
+  background-color: #d3d3d3 !important;
+  display: flex;
+  justify-content: center;
+  padding: 30px 10px;
+}
+
+.ql-editor {
+  background: white;
+  width: 21cm;
+  min-height: 29.7cm;
+  padding: 2.5cm !important;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  margin: 0 auto;
+}
+
+/* Print native styling */
+@media print {
+  #navbar, #dashboard-view, #editor-header, .btn {
+    display: none !important;
+  }
+  
+  body, #main, #editor-container, .ql-editor {
+    background: white !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    width: 100% !important;
+    height: auto !important;
+  }
+  
+  #editor-view {
+    display: block !important;
+  }
+}
