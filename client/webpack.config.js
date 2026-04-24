@@ -2,11 +2,16 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 const WebpackPwaManifest = require('webpack-pwa-manifest');
 const path = require('path');
 const { InjectManifest } = require('workbox-webpack-plugin');
-const { GenerateSW } = require('workbox-webpack-plugin');
 
 module.exports = () => {
   return {
     mode: 'development',
+    devServer: {
+      hot: true,
+      client: {
+        overlay: false,
+      },
+    },
     // Entry point for files
     entry: {
       main: './src/js/index.js',
@@ -30,6 +35,7 @@ module.exports = () => {
       new InjectManifest({
         swSrc: './src-sw.js',
         swDest: 'service-worker.js',
+        maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
       }),
       // Creates a manifest.json file.
       new WebpackPwaManifest({

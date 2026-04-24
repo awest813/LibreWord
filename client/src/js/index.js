@@ -2,6 +2,7 @@ import { Workbox } from 'workbox-window';
 import Editor from './editor';
 import { getAllDocs, createDoc, deleteDoc, updateDoc } from './database';
 import * as mammoth from 'mammoth';
+import './install';
 import '../css/style.css';
 
 const dashboardView = document.getElementById('dashboard-view');
@@ -12,47 +13,83 @@ const btnImportDoc = document.getElementById('btn-import-doc');
 const fileImport = document.getElementById('file-import');
 const btnBack = document.getElementById('btn-back');
 const docTitleInput = document.getElementById('doc-title');
+const searchInput = document.getElementById('search-docs');
+const brandLogo = document.getElementById('brand-logo');
 
-let currentEditorInstance = null;
 let currentDocId = null;
+let allDocs = [];
+let currentEditor = null;
 
-const renderDashboard = async () => {
+window.LW = {
+  newDoc: async () => {
+    const id = await createDoc('Untitled Document', '');
+    openEditor(id, 'Untitled Document');
+  },
+  importDoc: () => fileImport?.click(),
+};
+
+const renderDashboard = async (filter = '') => {
   dashboardView.style.display = 'block';
   editorView.style.display = 'none';
-  docList.innerHTML = 'Loading...';
+  document.getElementById('search-container').style.display = 'block';
   
-  const docs = await getAllDocs();
+  docList.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--text-muted);">Loading documents...</div>';
+  
+  allDocs = await getAllDocs();
+  const filteredDocs = allDocs.filter(doc => 
+    doc.title.toLowerCase().includes(filter.toLowerCase()) || 
+    (doc.content && doc.content.toLowerCase().includes(filter.toLowerCase()))
+  );
+  
   docList.innerHTML = '';
   
-  if (docs.length === 0) {
-    docList.innerHTML = '<p>No documents found. Create one!</p>';
+  if (filteredDocs.length === 0) {
+    docList.innerHTML = `<div style="grid-column: 1/-1; text-align: center; padding: 80px; color: var(--text-muted);">
+      ${filter ? 'No documents match your search.' : 'Your workspace is empty. Create or import a document to get started!'}
+    </div>`;
   } else {
-    docs.forEach(doc => {
+    filteredDocs.sort((a, b) => b.updatedAt - a.updatedAt).forEach(doc => {
       const card = document.createElement('div');
       card.className = 'doc-card';
+      
+      // Strip HTML for preview
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = doc.content || '';
+      const previewText = tempDiv.textContent || tempDiv.innerText || 'No content yet...';
+      const safeTitle = document.createElement('span');
+      safeTitle.textContent = doc.title || 'Untitled Document';
+      const safePreview = document.createElement('span');
+      safePreview.textContent = previewText;
+      
       card.innerHTML = `
-        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-          <div>
-            <h3>${doc.title || 'Untitled Document'}</h3>
-            <p>Last edited: ${new Date(doc.updatedAt).toLocaleDateString()}</p>
-          </div>
-          <button class="btn btn-sm btn-danger btn-delete" data-id="${doc.id}">
+        <div class="doc-card-info">
+          <h3 class="doc-title-text"></h3>
+          <p>Edited ${new Date(doc.updatedAt).toLocaleDateString()}</p>
+          <div class="doc-preview-text"></div>
+        </div>
+        <div class="doc-card-actions">
+          <button class="btn btn-sm btn-danger btn-icon btn-delete" title="Delete Document">
             <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
           </button>
         </div>
       `;
-      card.addEventListener('click', (e) => {
+      card.querySelector('.doc-title-text').textContent = doc.title || 'Untitled Document';
+      card.querySelector('.doc-preview-text').textContent = previewText;
+      
+      card.onclick = (e) => {
         if (!e.target.closest('.btn-delete')) {
           openEditor(doc.id, doc.title);
         }
-      });
-      card.querySelector('.btn-delete').addEventListener('click', async (e) => {
+      };
+      
+      card.querySelector('.btn-delete').onclick = async (e) => {
         e.stopPropagation();
-        if(confirm('Are you sure you want to delete this document?')) {
+        if(confirm(`Are you sure you want to delete "${doc.title}"?`)) {
           await deleteDoc(doc.id);
-          renderDashboard();
+          renderDashboard(searchInput.value);
         }
-      });
+      };
+      
       docList.appendChild(card);
     });
   }
@@ -60,25 +97,35 @@ const renderDashboard = async () => {
 
 const openEditor = (id, title) => {
   dashboardView.style.display = 'none';
-  editorView.style.display = 'block';
+  editorView.style.display = 'flex';
+  document.getElementById('search-container').style.display = 'none';
+  
   currentDocId = id;
   docTitleInput.value = title || '';
+
+  if (currentEditor) {
+    currentEditor.destroy();
+    currentEditor = null;
+  }
   
-  // Clean up old instance if exists
   document.getElementById('editor-container').innerHTML = '';
+  document.getElementById('toolbar-container').innerHTML = '';
+  document.getElementById('menu-bar').innerHTML = '';
   
-  currentEditorInstance = new Editor(id);
+  currentEditor = new Editor(id);
 };
 
-btnNewDoc.addEventListener('click', async () => {
-  const id = await createDoc('Untitled Document', '');
-  openEditor(id, 'Untitled Document');
-});
+// Event Listeners
+if (brandLogo) brandLogo.onclick = () => renderDashboard();
+
+if (btnNewDoc) {
+  btnNewDoc.onclick = () => window.LW.newDoc();
+}
 
 if (btnImportDoc && fileImport) {
-  btnImportDoc.addEventListener('click', () => fileImport.click());
+  btnImportDoc.onclick = () => fileImport.click();
 
-  fileImport.addEventListener('change', async (e) => {
+  fileImport.onchange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
@@ -92,7 +139,7 @@ if (btnImportDoc && fileImport) {
         htmlContent = result.value;
       } else if (file.name.endsWith('.txt') || file.name.endsWith('.md')) {
         const text = await file.text();
-        htmlContent = `<p>${text.replace(/\n/g, '<br>')}</p>`;
+        htmlContent = text.split('\n').map(line => `<p>${line}</p>`).join('');
       } else if (file.name.endsWith('.html') || file.name.endsWith('.htm')) {
         htmlContent = await file.text();
       } else {
@@ -108,42 +155,39 @@ if (btnImportDoc && fileImport) {
     }
     
     e.target.value = ''; // Reset input
-  });
+  };
 }
 
-// Update the New Doc button class
-btnNewDoc.className = 'btn btn-primary';
-btnNewDoc.innerHTML = `
-  <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-  New Document
-`;
+if (btnBack) {
+  btnBack.onclick = async () => {
+    if (currentDocId) {
+      await updateDoc(currentDocId, docTitleInput.value, undefined);
+    }
+    renderDashboard();
+  };
+}
 
-btnBack.className = 'btn btn-dark';
-btnBack.innerHTML = `
-  <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
-  Back
-`;
+if (docTitleInput) {
+  docTitleInput.onchange = async (e) => {
+    if (currentDocId) {
+      await updateDoc(currentDocId, e.target.value, undefined);
+    }
+  };
+}
 
-btnBack.addEventListener('click', async () => {
-  if (currentDocId) {
-    await updateDoc(currentDocId, docTitleInput.value, undefined);
-  }
-  renderDashboard();
-});
+if (searchInput) {
+  searchInput.oninput = (e) => {
+    renderDashboard(e.target.value);
+  };
+}
 
-docTitleInput.addEventListener('change', async (e) => {
-  if (currentDocId) {
-    await updateDoc(currentDocId, e.target.value, undefined);
-  }
-});
-
-// Init
-renderDashboard();
-
+// Service Worker
 if ('serviceWorker' in navigator) {
   const workboxSW = new Workbox('./service-worker.js');
   workboxSW.register();
-} else {
-  console.error('Service workers are not supported in this browser.');
 }
+
+// Initial Render
+renderDashboard();
+
 
