@@ -177,7 +177,13 @@ export default class {
     document.removeEventListener('selectionchange', this._boundSelectionChange);
     window.removeEventListener('beforeunload', this._boundCleanup);
 
-    if (this.saveTimeout) clearTimeout(this.saveTimeout);
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+      // Flush any pending save synchronously before destroying
+      if (this.quill) {
+        updateDoc(this.docId, undefined, this.quill.root.innerHTML);
+      }
+    }
     this.quill = null;
   }
 
@@ -207,16 +213,18 @@ export default class {
 
   setupAutoSave() {
     this.quill.on('text-change', () => {
-      updateDoc(this.docId, undefined, this.quill.root.innerHTML);
       this.updateStats();
       const status = document.getElementById('save-status');
       if (status) {
         status.innerHTML = '<span class="status-dot" style="background: #fbbf24; box-shadow: 0 0 6px #fbbf24;"></span> Saving...';
-        if (this.saveTimeout) clearTimeout(this.saveTimeout);
-        this.saveTimeout = setTimeout(() => {
-          status.innerHTML = '<span class="status-dot" style="background: #10b981; box-shadow: 0 0 6px #10b981;"></span> Saved';
-        }, 1000);
       }
+      if (this.saveTimeout) clearTimeout(this.saveTimeout);
+      this.saveTimeout = setTimeout(() => {
+        updateDoc(this.docId, undefined, this.quill.root.innerHTML);
+        if (status) {
+          status.innerHTML = '<span class="status-dot" style="background: #10b981; box-shadow: 0 0 6px #10b981;"></span> Saved';
+        }
+      }, 1000);
     });
   }
 
@@ -341,12 +349,15 @@ export default class {
       insertTable: () => this.showTablePicker(),
       pageBreak: () => {
         const range = this.quill.getSelection(true);
-        this.quill.insertEmbed(range.index, 'hr', '');
-        this.quill.setSelection(range.index + 1);
+        this.quill.clipboard.dangerouslyPasteHTML(
+          range.index,
+          '<div class="page-break"><br></div><p><br></p>'
+        );
+        this.quill.setSelection(range.index + 2);
       },
       horizontalRule: () => {
         const range = this.quill.getSelection(true);
-        this.quill.insertEmbed(range.index, 'hr', '');
+        this.quill.insertEmbed(range.index, 'hr', true);
         this.quill.setSelection(range.index + 1);
       },
       insertDateTime: () => {
@@ -360,10 +371,14 @@ export default class {
         if (Array.isArray(a)) {
           this.quill.format(a[0], a[1]);
         } else {
-          this.quill.format(a, !this.quill.format(a));
+          const currentFormat = this.quill.getFormat();
+          this.quill.format(a, !currentFormat[a]);
         }
       },
-      clearFormat: () => this.quill.removeFormat(),
+      clearFormat: () => {
+        const range = this.quill.getSelection();
+        if (range) this.quill.removeFormat(range.index, range.length);
+      },
       toggleRuler: () => {
         this.rulerVisible = !this.rulerVisible;
         const container = document.getElementById('ruler-container');
