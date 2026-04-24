@@ -187,6 +187,19 @@ if ('serviceWorker' in navigator) {
   workboxSW.register();
 }
 
+// Connection Status
+const connectionStatus = document.getElementById('connection-status');
+const updateConnectionStatus = () => {
+  if (!connectionStatus) return;
+  const online = navigator.onLine;
+  connectionStatus.innerHTML = online
+    ? '<span class="status-dot"></span> Online'
+    : '<span class="status-dot" style="background:#ef4444;box-shadow:0 0 6px #ef4444;"></span> Offline';
+};
+window.addEventListener('online', updateConnectionStatus);
+window.addEventListener('offline', updateConnectionStatus);
+updateConnectionStatus();
+
 // Initial Render
 renderDashboard();
 
