@@ -1,5 +1,7 @@
 import { getDoc, updateDoc } from './database';
+import { escapeHtml, safeFileName, sanitizeDocumentHtml } from './documentHtml';
 import Quill from 'quill';
+import 'quill/dist/quill.snow.css';
 import html2pdf from 'html2pdf.js';
 import { saveAs } from 'file-saver';
 
@@ -23,7 +25,7 @@ const MENU_CONFIG = {
     { label: 'Import...', shortcut: 'Ctrl+O', action: 'importDoc' },
     { type: 'separator' },
     { label: 'Export as PDF', action: 'export', args: 'pdf' },
-    { label: 'Export as Word (.doc)', action: 'export', args: 'docx' },
+    { label: 'Export as Word (.doc)', action: 'export', args: 'doc' },
     { label: 'Export as HTML', action: 'export', args: 'html' },
     { label: 'Export as Text', action: 'export', args: 'txt' },
     { type: 'separator' },
@@ -99,6 +101,8 @@ export default class {
     this.rulerVisible = true;
     this.activeMenu = null;
     this.destroyed = false;
+    this.pendingSave = Promise.resolve();
+    this.exportStatusTimeout = null;
     this._boundCleanup = this.destroy.bind(this);
     this._boundKeydown = this._handleKeydown.bind(this);
     this._boundClick = this._handleDocClick.bind(this);
@@ -148,7 +152,7 @@ export default class {
   async init() {
     const doc = await getDoc(this.docId);
     if (doc && doc.content) {
-      this.quill.clipboard.dangerouslyPasteHTML(doc.content);
+      this.quill.clipboard.dangerouslyPasteHTML(sanitizeDocumentHtml(doc.content));
     }
 
     this.updateStats();
@@ -168,7 +172,39 @@ export default class {
     window.addEventListener('beforeunload', this._boundCleanup);
   }
 
-  destroy() {
+  async flushSave() {
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+      this.saveTimeout = null;
+    }
+
+    if (!this.quill) {
+      await this.pendingSave;
+      return;
+    }
+
+    const content = this.quill.root.innerHTML;
+    this.pendingSave = updateDoc(this.docId, undefined, content);
+    await this.pendingSave;
+  }
+
+  async flushDocumentState() {
+    const titleInput = document.getElementById('doc-title');
+    const title = titleInput && titleInput.value.trim() ? titleInput.value.trim() : 'Untitled Document';
+    const content = this.quill ? this.quill.root.innerHTML : '';
+
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout);
+      this.saveTimeout = null;
+    }
+
+    this.pendingSave = updateDoc(this.docId, title, content);
+    await this.pendingSave;
+
+    return { title, content };
+  }
+
+  async destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
 
@@ -177,14 +213,34 @@ export default class {
     document.removeEventListener('selectionchange', this._boundSelectionChange);
     window.removeEventListener('beforeunload', this._boundCleanup);
 
-    if (this.saveTimeout) {
-      clearTimeout(this.saveTimeout);
-      // Flush any pending save synchronously before destroying
-      if (this.quill) {
-        updateDoc(this.docId, undefined, this.quill.root.innerHTML);
-      }
+    if (this.exportStatusTimeout) {
+      clearTimeout(this.exportStatusTimeout);
+      this.exportStatusTimeout = null;
     }
+
+    await this.flushSave();
     this.quill = null;
+  }
+
+  setExportStatus(message = '', color = '#94a3b8', timeout = 0) {
+    const status = document.getElementById('export-status');
+    if (!status) return;
+
+    if (this.exportStatusTimeout) {
+      clearTimeout(this.exportStatusTimeout);
+      this.exportStatusTimeout = null;
+    }
+
+    status.textContent = message;
+    status.style.color = color;
+
+    if (timeout > 0) {
+      this.exportStatusTimeout = setTimeout(() => {
+        status.textContent = '';
+        status.style.color = '';
+        this.exportStatusTimeout = null;
+      }, timeout);
+    }
   }
 
   updateStats() {
@@ -219,8 +275,10 @@ export default class {
         status.innerHTML = '<span class="status-dot" style="background: #fbbf24; box-shadow: 0 0 6px #fbbf24;"></span> Saving...';
       }
       if (this.saveTimeout) clearTimeout(this.saveTimeout);
-      this.saveTimeout = setTimeout(() => {
-        updateDoc(this.docId, undefined, this.quill.root.innerHTML);
+      this.saveTimeout = setTimeout(async () => {
+        this.saveTimeout = null;
+        this.pendingSave = updateDoc(this.docId, undefined, this.quill.root.innerHTML);
+        await this.pendingSave;
         if (status) {
           status.innerHTML = '<span class="status-dot" style="background: #10b981; box-shadow: 0 0 6px #10b981;"></span> Saved';
         }
@@ -761,38 +819,58 @@ export default class {
         const format = e.target.value;
         if (!format) return;
 
-        const doc = await getDoc(this.docId);
-        const title = (doc && doc.title) ? doc.title : 'document';
+        try {
+          selectExport.disabled = true;
+          this.setExportStatus('Exporting...', '#38bdf8');
 
-        if (format === 'pdf') {
-          const element = document.querySelector('.ql-editor');
-          const opt = {
-            margin: [0.5, 0.5],
-            filename: `${title}.pdf`,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true },
-            jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
-          };
-          html2pdf().set(opt).from(element).save();
-        } else if (format === 'txt') {
-          const text = this.quill.getText();
-          const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-          saveAs(blob, `${title}.txt`);
-        } else if (format === 'html') {
-          const html = this.quill.root.innerHTML;
-          const style = '<style>body{font-family:sans-serif;padding:2cm;line-height:1.6;max-width:21cm;margin:auto;}</style>';
-          const blob = new Blob([`<!DOCTYPE html><html><head><meta charset="utf-8">${style}</head><body>${html}</body></html>`], { type: 'text/html;charset=utf-8' });
-          saveAs(blob, `${title}.html`);
-        } else if (format === 'docx') {
-          const html = this.quill.root.innerHTML;
-          const docHtml = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-          <head><meta charset='utf-8'><title>${title}</title></head>
-          <body>${html}</body></html>`;
-          const blob = new Blob(['\ufeff', docHtml], { type: 'application/msword' });
-          saveAs(blob, `${title}.doc`);
+          const { title, content } = await this.flushDocumentState();
+          const fileName = safeFileName(title);
+          const escapedTitle = escapeHtml(title);
+          const safeHtml = sanitizeDocumentHtml(content);
+          let exportedLabel = 'file';
+
+          if (format === 'pdf') {
+            exportedLabel = 'PDF';
+            const element = document.querySelector('.ql-editor');
+            if (!element) throw new Error('Editor content is not available for PDF export.');
+            const orientation = document.getElementById('page-orientation')?.value || 'portrait';
+            const opt = {
+              margin: [0.5, 0.5],
+              filename: `${fileName}.pdf`,
+              image: { type: 'jpeg', quality: 0.98 },
+              html2canvas: { scale: 2, useCORS: true },
+              jsPDF: { unit: 'in', format: 'letter', orientation }
+            };
+            await html2pdf().set(opt).from(element).save();
+          } else if (format === 'txt') {
+            exportedLabel = 'text';
+            const text = this.quill.getText();
+            const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+            saveAs(blob, `${fileName}.txt`);
+          } else if (format === 'html') {
+            exportedLabel = 'HTML';
+            const style = '<style>body{font-family:sans-serif;padding:2cm;line-height:1.6;max-width:21cm;margin:auto;}</style>';
+            const blob = new Blob([`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapedTitle}</title>${style}</head><body>${safeHtml}</body></html>`], { type: 'text/html;charset=utf-8' });
+            saveAs(blob, `${fileName}.html`);
+          } else if (format === 'doc' || format === 'docx') {
+            exportedLabel = 'Word';
+            const docHtml = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+            <head><meta charset='utf-8'><title>${escapedTitle}</title></head>
+            <body>${safeHtml}</body></html>`;
+            const blob = new Blob(['\ufeff', docHtml], { type: 'application/msword;charset=utf-8' });
+            saveAs(blob, `${fileName}.doc`);
+          } else {
+            throw new Error(`Unsupported export format: ${format}`);
+          }
+
+          this.setExportStatus(`Exported ${exportedLabel}`, '#10b981', 2500);
+        } catch (err) {
+          console.error('Export error:', err);
+          this.setExportStatus('Export failed', '#ef4444', 6000);
+        } finally {
+          selectExport.disabled = false;
+          e.target.value = '';
         }
-
-        e.target.value = '';
       };
     }
   }

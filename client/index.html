@@ -4,7 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LibreWord | Premium Document System</title>
-    <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
   </head>
   <body>
     <nav id="navbar">
@@ -26,7 +25,7 @@
 
       <div class="search-container" id="search-container">
         <svg class="search-icon" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-        <input type="text" id="search-docs" class="search-input" placeholder="Search documents..." />
+        <input type="text" id="search-docs" class="search-input" placeholder="Search" />
       </div>
       
       <div class="navbar-right">
@@ -83,10 +82,11 @@
             </div>
 
             <div id="editor-actions" class="navbar-right">
+              <span id="export-status" class="export-status" aria-live="polite"></span>
               <select id="export-format" class="btn btn-primary" style="padding-right: 30px;">
                 <option value="" disabled selected>Export</option>
                 <option value="pdf">PDF</option>
-                <option value="docx">Word</option>
+                <option value="doc">Word</option>
                 <option value="txt">Text</option>
                 <option value="html">HTML</option>
               </select>

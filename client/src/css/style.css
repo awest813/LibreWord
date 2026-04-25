@@ -20,7 +20,7 @@
   --menu-height: 30px;
   --toolbar-height: 44px;
   --ruler-height: 24px;
-  --footer-height: 28px;
+  --footer-height: 34px;
   --glass-border: rgba(255, 255, 255, 0.08);
   --glass-border-light: rgba(255, 255, 255, 0.12);
   --page-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
@@ -65,6 +65,7 @@ button { font-family: inherit; }
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
 }
 
 .brand {
@@ -184,6 +185,8 @@ button { font-family: inherit; }
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
   margin-bottom: 28px;
 }
 
@@ -191,17 +194,22 @@ button { font-family: inherit; }
   font-family: 'Outfit', sans-serif;
   font-size: 1.4rem;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .dashboard-actions {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
 }
 
 .search-container {
   position: relative;
-  flex-grow: 1;
-  max-width: 380px;
+  flex: 1 1 220px;
+  max-width: 280px;
+  min-width: 120px;
   margin: 0 20px;
 }
 
@@ -818,7 +826,7 @@ button { font-family: inherit; }
   border-top: 1px solid var(--glass-border);
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  padding: 4px 12px;
   font-size: 0.7rem;
   color: var(--text-muted);
   gap: 0;
@@ -865,6 +873,14 @@ button { font-family: inherit; }
 #export-format option {
   background: var(--bg-surface);
   color: var(--text-main);
+}
+
+.export-status {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  min-width: 0;
+  white-space: nowrap;
+  transition: color 0.15s, opacity 0.15s;
 }
 
 .view-modes {
@@ -951,4 +967,82 @@ button { font-family: inherit; }
   #ruler-container { display: none; }
   .header-tools { gap: 0; }
   #editor-actions .btn-dark { display: none; }
+}
+
+@media (max-width: 900px) {
+  #navbar {
+    padding: 0 12px;
+    gap: 10px;
+  }
+
+  .search-container {
+    display: none;
+  }
+
+  .dashboard-view {
+    padding: 28px 24px;
+  }
+
+  .dashboard-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .dashboard-title {
+    font-size: 1.6rem;
+    line-height: 1.1;
+  }
+
+  .dashboard-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .dashboard-actions .btn {
+    flex: 1 1 150px;
+    justify-content: center;
+  }
+
+  .doc-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #editor-header {
+    flex-wrap: wrap;
+  }
+
+  #doc-title {
+    min-width: 0;
+    max-width: none;
+  }
+
+  #editor-footer {
+    overflow-x: auto;
+    justify-content: flex-start;
+    min-height: 34px;
+    height: auto;
+    padding: 4px 10px;
+  }
+
+  #page-info,
+  #char-count,
+  #cursor-position,
+  .view-modes,
+  #page-orientation {
+    display: none;
+  }
+
+  .footer-section {
+    gap: 10px;
+  }
+}
+
+@media (max-width: 420px) {
+  .brand h1 {
+    display: none;
+  }
+
+  .dashboard-view {
+    padding: 24px 16px;
+  }
 }

@@ -1,6 +1,7 @@
 import { Workbox } from 'workbox-window';
 import Editor from './editor';
 import { getAllDocs, createDoc, deleteDoc, updateDoc } from './database';
+import { htmlToPlainText, sanitizeDocumentHtml, textToParagraphHtml } from './documentHtml';
 import * as mammoth from 'mammoth';
 import './install';
 import '../css/style.css';
@@ -52,14 +53,7 @@ const renderDashboard = async (filter = '') => {
       const card = document.createElement('div');
       card.className = 'doc-card';
       
-      // Strip HTML for preview
-      const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = doc.content || '';
-      const previewText = tempDiv.textContent || tempDiv.innerText || 'No content yet...';
-      const safeTitle = document.createElement('span');
-      safeTitle.textContent = doc.title || 'Untitled Document';
-      const safePreview = document.createElement('span');
-      safePreview.textContent = previewText;
+      const previewText = htmlToPlainText(doc.content);
       
       card.innerHTML = `
         <div class="doc-card-info">
@@ -95,7 +89,7 @@ const renderDashboard = async (filter = '') => {
   }
 };
 
-const openEditor = (id, title) => {
+const openEditor = async (id, title) => {
   dashboardView.style.display = 'none';
   editorView.style.display = 'flex';
   document.getElementById('search-container').style.display = 'none';
@@ -104,7 +98,7 @@ const openEditor = (id, title) => {
   docTitleInput.value = title || '';
 
   if (currentEditor) {
-    currentEditor.destroy();
+    await currentEditor.destroy();
     currentEditor = null;
   }
   
@@ -136,12 +130,12 @@ if (btnImportDoc && fileImport) {
       if (file.name.endsWith('.docx')) {
         const arrayBuffer = await file.arrayBuffer();
         const result = await mammoth.convertToHtml({ arrayBuffer });
-        htmlContent = result.value;
+        htmlContent = sanitizeDocumentHtml(result.value);
       } else if (file.name.endsWith('.txt') || file.name.endsWith('.md')) {
         const text = await file.text();
-        htmlContent = text.split('\n').map(line => `<p>${line}</p>`).join('');
+        htmlContent = textToParagraphHtml(text);
       } else if (file.name.endsWith('.html') || file.name.endsWith('.htm')) {
-        htmlContent = await file.text();
+        htmlContent = sanitizeDocumentHtml(await file.text());
       } else {
         alert('Unsupported file format for import.');
         return;
@@ -162,6 +156,9 @@ if (btnBack) {
   btnBack.onclick = async () => {
     if (currentDocId) {
       await updateDoc(currentDocId, docTitleInput.value, undefined);
+    }
+    if (currentEditor) {
+      await currentEditor.flushSave();
     }
     renderDashboard();
   };

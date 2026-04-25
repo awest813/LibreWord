@@ -16,18 +16,19 @@ module.exports = () => {
     entry: {
       main: './src/js/index.js',
       install: './src/js/install.js',
-      editor: './src/js/editor.js'
     },
     // Output for our bundles
     output: {
-      filename: '[name].bundle.js',
+      filename: '[name].[contenthash].bundle.js',
       path: path.resolve(__dirname, 'dist'),
+      clean: true,
     },
     plugins: [
       // Webpack plugin that generates our html file and injects our bundles. 
       new HtmlWebpackPlugin({
         template: './index.html',
-        title: 'LibreWord'
+        title: 'LibreWord',
+        cache: false,
       }),
      
       

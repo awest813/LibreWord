@@ -1,14 +1,19 @@
 const { warmStrategyCache } = require('workbox-recipes');
-const { CacheFirst, StaleWhileRevalidate } = require('workbox-strategies');
+const { NetworkFirst, StaleWhileRevalidate } = require('workbox-strategies');
 const { registerRoute } = require('workbox-routing');
+const { clientsClaim } = require('workbox-core');
 const { CacheableResponsePlugin } = require('workbox-cacheable-response');
 const { ExpirationPlugin } = require('workbox-expiration');
 const { precacheAndRoute } = require('workbox-precaching/precacheAndRoute');
 
+self.skipWaiting();
+clientsClaim();
+
 precacheAndRoute(self.__WB_MANIFEST);
 
-const pageCache = new CacheFirst({
+const pageCache = new NetworkFirst({
   cacheName: 'page-cache',
+  networkTimeoutSeconds: 3,
   plugins: [
     new CacheableResponsePlugin({
       statuses: [0, 200],
@@ -28,7 +33,7 @@ registerRoute(({ request }) => request.mode === 'navigate', pageCache);
 
 // Setup asset caching
 registerRoute(
-  ({ request }) => ['style', 'script', 'worker'].includes(request.destination),
+  ({ request }) => ['style', 'worker'].includes(request.destination),
   new StaleWhileRevalidate({
     // Name of the cache storage.
     cacheName: 'asset-cache',
