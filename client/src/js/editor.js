@@ -91,7 +91,7 @@ const CONTEXT_MENU_ITEMS = [
   { label: 'Italic', shortcut: 'Ctrl+I', action: 'format', args: 'italic' },
   { label: 'Underline', shortcut: 'Ctrl+U', action: 'format', args: 'underline' },
   { type: 'separator' },
-  { label: 'Paragraph...', action: 'findReplace' },
+  { label: 'Find & Replace', shortcut: 'Ctrl+H', action: 'findReplace' },
 ];
 
 export default class {
@@ -219,6 +219,7 @@ export default class {
     }
 
     await this.flushSave();
+    this.closeDialogOverlay();
     this.quill = null;
   }
 
@@ -245,7 +246,7 @@ export default class {
 
   updateStats() {
     const text = this.quill.getText().trim();
-    const wordCount = text ? text.split(/\s+/).length : 0;
+    const wordCount = text ? text.split(/\s+/).filter(Boolean).length : 0;
     const charCount = text.length;
 
     const wordEl = document.getElementById('word-count');
@@ -253,6 +254,23 @@ export default class {
     if (wordEl) wordEl.innerText = `Words: ${wordCount}`;
     if (charEl) charEl.innerText = `Characters: ${charCount}`;
     this.updateCursorPosition();
+    this.updatePageInfo();
+  }
+
+  updatePageInfo() {
+    const pageInfo = document.getElementById('page-info');
+    if (!pageInfo || !this.quill) return;
+    const ed = document.querySelector('.ql-editor');
+    if (!ed) return;
+    if (ed.classList.contains('web-layout')) {
+      pageInfo.textContent = 'Continuous';
+      return;
+    }
+    const isLandscape = ed.classList.contains('landscape');
+    const pageHeightCm = isLandscape ? 21 : 29.7;
+    const pageHpx = pageHeightCm * 37.8;
+    const pages = Math.max(1, Math.ceil(ed.scrollHeight / pageHpx));
+    pageInfo.textContent = pages === 1 ? '1 page' : `${pages} pages`;
   }
 
   updateCursorPosition() {
@@ -370,6 +388,16 @@ export default class {
     this.activeMenu = null;
   }
 
+  closeDialogOverlay() {
+    const overlay = document.getElementById('dialog-overlay');
+    if (!overlay) return;
+    if (overlay._closeHandler) {
+      overlay.removeEventListener('click', overlay._closeHandler);
+      overlay._closeHandler = null;
+    }
+    overlay.classList.add('hidden');
+  }
+
   executeAction(action, args) {
     const actions = {
       newDoc: () => { if (window.LW) window.LW.newDoc(); },
@@ -470,15 +498,22 @@ export default class {
     const overlay = document.getElementById('dialog-overlay');
     const box = document.getElementById('dialog-box');
     if (!overlay || !box) return;
+    this.closeDialogOverlay();
+    const close = () => {
+      overlay.classList.add('hidden');
+      if (overlay._closeHandler) {
+        overlay.removeEventListener('click', overlay._closeHandler);
+        overlay._closeHandler = null;
+      }
+    };
     box.innerHTML = `
-      <div class="dialog-title">${title}</div>
+      <div class="dialog-title">${escapeHtml(title)}</div>
       <div class="dialog-body">${bodyHtml}</div>
       <div class="dialog-actions">
-        <button class="btn btn-primary dialog-close-btn">Close</button>
+        <button type="button" class="btn btn-primary dialog-close-btn">Close</button>
       </div>
     `;
     overlay.classList.remove('hidden');
-    const close = () => overlay.classList.add('hidden');
     box.querySelector('.dialog-close-btn').onclick = close;
     overlay._closeHandler = (e) => { if (e.target === overlay) close(); };
     overlay.addEventListener('click', overlay._closeHandler);
@@ -564,6 +599,7 @@ export default class {
 
     const toolbar = document.querySelector('#toolbar-container');
     if (toolbar) {
+      picker.style.transform = '';
       const rect = toolbar.getBoundingClientRect();
       const pickerWidth = 220;
       const left = Math.min(rect.left + 300, window.innerWidth - pickerWidth - 16);
@@ -650,12 +686,22 @@ export default class {
     if (e.key === 'Escape') {
       const overlay = document.getElementById('dialog-overlay');
       if (overlay && !overlay.classList.contains('hidden')) {
-        overlay.classList.add('hidden');
+        this.closeDialogOverlay();
         return;
       }
       const picker = document.getElementById('table-picker');
       if (picker && !picker.classList.contains('hidden')) {
         picker.classList.add('hidden');
+        return;
+      }
+      const findBar = document.getElementById('find-replace-bar');
+      if (findBar && !findBar.classList.contains('hidden')) {
+        findBar.classList.add('hidden');
+        return;
+      }
+      const ctxMenu = document.getElementById('context-menu');
+      if (ctxMenu && !ctxMenu.classList.contains('hidden')) {
+        ctxMenu.classList.add('hidden');
         return;
       }
       this.closeMenus();
@@ -690,7 +736,10 @@ export default class {
   }
 
   _handleDocClick() {
-    if (!this.destroyed) this.closeMenus();
+    if (this.destroyed) return;
+    this.closeMenus();
+    const menu = document.getElementById('context-menu');
+    if (menu) menu.classList.add('hidden');
   }
 
   _handleSelectionChange() {
@@ -707,6 +756,7 @@ export default class {
     }
     if (zoomText) zoomText.innerText = `${this.currentZoom}%`;
     this.drawRuler();
+    this.updatePageInfo();
   }
 
   setupZoomAndOrientation() {
@@ -723,6 +773,7 @@ export default class {
         if (editor) {
           editor.classList.toggle('landscape', e.target.value === 'landscape');
           this.drawRuler();
+          this.updatePageInfo();
         }
       };
     }
@@ -738,6 +789,7 @@ export default class {
         if (editor) editor.classList.remove('web-layout');
         btnPrint.classList.add('active');
         btnWeb.classList.remove('active');
+        this.updatePageInfo();
       };
     }
 
@@ -747,6 +799,7 @@ export default class {
         if (editor) editor.classList.add('web-layout');
         btnWeb.classList.add('active');
         btnPrint.classList.remove('active');
+        this.updatePageInfo();
       };
     }
   }

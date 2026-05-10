@@ -46,6 +46,13 @@ body {
 
 button { font-family: inherit; }
 
+button:focus-visible,
+.btn:focus-visible,
+[role='button']:focus-visible {
+  outline: 2px solid var(--primary-light);
+  outline-offset: 2px;
+}
+
 /* ───────── Navbar ───────── */
 #navbar {
   height: var(--navbar-height);
@@ -136,6 +143,11 @@ button { font-family: inherit; }
 }
 
 .btn-icon { padding: 7px; border-radius: 6px; }
+
+.btn-sm {
+  padding: 5px 8px;
+  font-size: 0.75rem;
+}
 
 .btn-flat {
   background: transparent;

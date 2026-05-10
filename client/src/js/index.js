@@ -29,17 +29,21 @@ window.LW = {
   importDoc: () => fileImport?.click(),
 };
 
-const renderDashboard = async (filter = '') => {
+const renderDashboard = async (filter = '', reloadFromDb = true) => {
   dashboardView.style.display = 'block';
   editorView.style.display = 'none';
-  document.getElementById('search-container').style.display = 'block';
-  
-  docList.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--text-muted);">Loading documents...</div>';
-  
-  allDocs = await getAllDocs();
-  const filteredDocs = allDocs.filter(doc => 
-    doc.title.toLowerCase().includes(filter.toLowerCase()) || 
-    (doc.content && doc.content.toLowerCase().includes(filter.toLowerCase()))
+  const searchContainer = document.getElementById('search-container');
+  if (searchContainer) searchContainer.style.display = 'block';
+
+  if (reloadFromDb) {
+    docList.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: var(--text-muted);">Loading documents...</div>';
+    allDocs = await getAllDocs();
+  }
+
+  const q = (filter || '').toLowerCase();
+  const filteredDocs = allDocs.filter((doc) =>
+    (doc.title || '').toLowerCase().includes(q) ||
+    (doc.content && doc.content.toLowerCase().includes(q))
   );
   
   docList.innerHTML = '';
@@ -62,7 +66,7 @@ const renderDashboard = async (filter = '') => {
           <div class="doc-preview-text"></div>
         </div>
         <div class="doc-card-actions">
-          <button class="btn btn-sm btn-danger btn-icon btn-delete" title="Delete Document">
+          <button type="button" class="btn btn-sm btn-danger btn-icon btn-delete" title="Delete document" aria-label="Delete document">
             <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
           </button>
         </div>
@@ -78,9 +82,9 @@ const renderDashboard = async (filter = '') => {
       
       card.querySelector('.btn-delete').onclick = async (e) => {
         e.stopPropagation();
-        if(confirm(`Are you sure you want to delete "${doc.title}"?`)) {
+        if (confirm(`Are you sure you want to delete "${doc.title || 'Untitled Document'}"?`)) {
           await deleteDoc(doc.id);
-          renderDashboard(searchInput.value);
+          renderDashboard(searchInput?.value || '', true);
         }
       };
       
@@ -110,7 +114,19 @@ const openEditor = async (id, title) => {
 };
 
 // Event Listeners
-if (brandLogo) brandLogo.onclick = () => renderDashboard();
+if (brandLogo) {
+  brandLogo.setAttribute('role', 'button');
+  brandLogo.setAttribute('tabindex', '0');
+  brandLogo.setAttribute('aria-label', 'LibreWord — return to documents');
+  const goDashboard = () => renderDashboard(searchInput?.value || '', true);
+  brandLogo.addEventListener('click', goDashboard);
+  brandLogo.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      goDashboard();
+    }
+  });
+}
 
 if (btnNewDoc) {
   btnNewDoc.onclick = () => window.LW.newDoc();
@@ -160,7 +176,7 @@ if (btnBack) {
     if (currentEditor) {
       await currentEditor.flushSave();
     }
-    renderDashboard();
+    renderDashboard(searchInput?.value || '', true);
   };
 }
 
@@ -173,9 +189,9 @@ if (docTitleInput) {
 }
 
 if (searchInput) {
-  searchInput.oninput = (e) => {
-    renderDashboard(e.target.value);
-  };
+  searchInput.addEventListener('input', (e) => {
+    renderDashboard(e.target.value, false);
+  });
 }
 
 // Service Worker
