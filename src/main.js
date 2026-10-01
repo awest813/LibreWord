@@ -32,8 +32,12 @@ async function importAndOpen(file) {
   }
 }
 
+const prefetchEditor = () => import('./ui/editor-screen.js').catch(() => {});
+
 async function showStart() {
   document.title = 'LibreWord';
+  // Warm the editor chunk while the user browses, so opening a document is instant.
+  (window.requestIdleCallback || ((fn) => setTimeout(fn, 1500)))(prefetchEditor);
   renderStartScreen(root, {
     onOpen: (id) => go(`#/doc/${id}`),
     onTemplate: newFromTemplate,

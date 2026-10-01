@@ -14,7 +14,7 @@ import JSZip from 'jszip';
 
 import { startPreview, CHROME } from './server.mjs';
 
-const { base: BASE, stop } = await startPreview(4199);
+const { base: BASE, stop } = await startPreview();
 
 const browser = await chromium.launch({ executablePath: CHROME });
 const context = await browser.newContext({ viewport: { width: 1400, height: 950 }, acceptDownloads: true });

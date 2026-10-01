@@ -728,6 +728,7 @@ export class Ribbon {
   renderBody() {
     this.updaters = [];
     const tab = this.tabs.find((t) => t.id === this.current) || this.tabs[0];
+    this.bodyEl.dataset.tab = tab.id;
     this.bodyEl.replaceChildren(...tab.build());
     if (this.editor) this.update();
   }

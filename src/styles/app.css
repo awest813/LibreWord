@@ -573,6 +573,21 @@ kbd { font: 12px var(--font-ui); background: var(--surface-2); border: 1px solid
 .toast-action { border: 0; background: transparent; color: #9cc3ff; font-weight: 600; padding: 0; }
 
 /* ------------------------------------------------------------------ responsive */
+/* Like Word, the ribbon condenses before it scrolls: fewer style previews, then icon-only small buttons. */
+@media (max-width: 1360px) {
+  .style-gallery .style-card:nth-of-type(n + 5) { display: none; }
+}
+@media (max-width: 1240px) {
+  .style-gallery .style-card:nth-of-type(n + 4) { display: none; }
+  .ribbon[data-tab='home'] .ribbon-col > .rb:not(.rb-large) .rb-label { display: none; }
+  .ribbon[data-tab='home'] .ribbon-col > .rb:not(.rb-large) { justify-content: flex-start; }
+}
+@media (max-width: 1080px) {
+  .style-gallery .style-card:nth-of-type(n + 3) { display: none; }
+  .ribbon-group { padding: 0 3px; }
+  .combo-font { width: 128px; }
+  .combo-font input { width: 104px; }
+}
 @media (max-width: 900px) {
   .titlebar-search { display: none; }
   .nav-pane { position: absolute; z-index: 6; top: 0; bottom: 0; left: 0; box-shadow: var(--shadow-popover); }
