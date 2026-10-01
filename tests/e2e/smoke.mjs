@@ -46,6 +46,8 @@ const layoutViolations = () =>
     const root = s.editorEl.getBoundingClientRect();
     const z = root.width / g.width;
     const P = g.height + g.gap;
+    // Zoomed text snaps to device pixels, so allow a couple of device pixels of slack.
+    const slack = 2 / Math.min(1, z);
     const bad = [];
     const walker = document.createTreeWalker(s.editorEl, NodeFilter.SHOW_TEXT);
     const range = document.createRange();
@@ -57,7 +59,7 @@ const layoutViolations = () =>
         const top = (r.top - root.top) / z;
         const bottom = (r.bottom - root.top) / z;
         const k = Math.floor(top / P);
-        if (top < k * P + g.margins.top - 2 || bottom > k * P + g.height - g.margins.bottom + 4) {
+        if (top < k * P + g.margins.top - slack || bottom > k * P + g.height - g.margins.bottom + 2 + slack) {
           bad.push(`"${n.textContent.slice(0, 24)}" ${top.toFixed(0)}–${bottom.toFixed(0)} (page ${k + 1})`);
         }
       }
@@ -237,6 +239,100 @@ await test('page setup changes the page geometry', async () => {
   await settle();
   const width = await page.evaluate(() => window.libreword.screen.editorEl.offsetWidth);
   assert.equal(width, 1056);
+});
+
+await test('Ctrl+Enter splits the paragraph onto a new page', async () => {
+  await page.evaluate(() => {
+    const ed = window.libreword.editor;
+    ed.commands.setContent('<p>first half second half</p>');
+    ed.commands.setTextSelection(12);
+    ed.commands.focus();
+  });
+  await settle(); // TipTap focuses on the next animation frame
+  await page.keyboard.press('Control+Enter');
+  await settle();
+  const json = await page.evaluate(() => window.libreword.editor.getJSON().content.map((n) => n.type));
+  assert.deepEqual(json.slice(0, 3), ['paragraph', 'pageBreak', 'paragraph']);
+  assert.equal(await page.evaluate(() => window.libreword.screen.pageCount), 2);
+  await page.keyboard.press('Control+z');
+  await settle();
+  assert.equal(await page.evaluate(() => window.libreword.screen.pageCount), 1);
+});
+
+await test('format painter copies character formatting', async () => {
+  await page.click('.ribbon-tab[data-tab="home"]');
+  await page.evaluate(() => {
+    const ed = window.libreword.editor;
+    ed.commands.setContent('<p><strong><em>source</em></strong> target</p>');
+    ed.commands.setTextSelection(3);
+  });
+  await page.click('.rb[aria-label="Format Painter"]');
+  await page.evaluate(() => window.libreword.editor.commands.setTextSelection({ from: 8, to: 14 }));
+  await page.dispatchEvent('.lw-document', 'mouseup');
+  await settle();
+  const html = await page.evaluate(() => window.libreword.editor.getHTML());
+  assert.match(html, /<strong><em>source<\/em><\/strong> <strong><em>target<\/em><\/strong>/);
+});
+
+await test('insert a link through the dialog', async () => {
+  await page.evaluate(() => {
+    const ed = window.libreword.editor;
+    ed.commands.setContent('<p>visit example</p>');
+    ed.commands.setTextSelection({ from: 7, to: 14 });
+  });
+  await page.keyboard.press('Control+k');
+  await page.fill('dialog input[name="href"]', 'example.com');
+  await page.press('dialog input[name="href"]', 'Enter');
+  const html = await page.evaluate(() => window.libreword.editor.getHTML());
+  assert.match(html, /<a [^>]*href="https:\/\/example\.com"[^>]*>example<\/a>/);
+});
+
+await test('insert a picture from a file', async () => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+  await page.evaluate(() => window.libreword.editor.commands.setContent('<p>pic: </p>'));
+  await page.click('.ribbon-tab[data-tab="insert"]');
+  await page.click('.rb[aria-label="Pictures"]');
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.click('.menu-item:has-text("This Device")')]);
+  await chooser.setFiles({ name: 'dot.png', mimeType: 'image/png', buffer: png });
+  await page.waitForFunction(() => window.libreword.editor.getHTML().includes('<img'));
+  const html = await page.evaluate(() => window.libreword.editor.getHTML());
+  assert.match(html, /<img [^>]*src="data:image\/png;base64,/);
+  assert.match(html, /alt="dot"/);
+});
+
+await test('dragging the ruler changes the left margin', async () => {
+  await page.evaluate(() => window.libreword.screen.setLayout('print'));
+  await page.evaluate(() => window.libreword.screen.updateSettings({ orientation: 'portrait', margins: { top: 96, bottom: 96, left: 96, right: 96 } }));
+  await settle();
+  const box = await page.locator('.ruler-handle[aria-label="Left margin"]').boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + 4);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 48, box.y + 4, { steps: 4 });
+  await page.mouse.up();
+  await settle();
+  const left = await page.evaluate(() => window.libreword.screen.settings.margins.left);
+  assert.ok(Math.abs(left - 144) <= 6, `left margin ${left}`);
+});
+
+await test('layout stays valid when zoomed', async () => {
+  await page.evaluate(() => {
+    window.libreword.editor.commands.setContent(Array.from({ length: 60 }, (_, i) => `<p>Zoomed paragraph ${i} with enough words to wrap onto a second line at this width, hopefully.</p>`).join(''));
+    window.libreword.screen.setZoom(1.5);
+  });
+  await settle();
+  assert.deepEqual(await layoutViolations(), []);
+  await page.evaluate(() => window.libreword.screen.setZoom(0.5));
+  await settle();
+  assert.deepEqual(await layoutViolations(), []);
+  await page.evaluate(() => window.libreword.screen.setZoom(1));
+});
+
+await test('table of contents lists headings with page numbers', async () => {
+  await page.evaluate(() => window.libreword.editor.commands.setContent('<nav data-toc></nav><h1>One</h1><p>x</p><div data-page-break></div><h1>Two</h1><h2>Two point one</h2>'));
+  await page.waitForFunction(() => document.querySelectorAll('.toc-entry').length === 3);
+  await sleep(400);
+  const entries = await page.$$eval('.toc-entry', (els) => els.map((e) => `${e.querySelector('.toc-text').textContent}:${e.querySelector('.toc-page').textContent}`));
+  assert.deepEqual(entries, ['One:1', 'Two:2', 'Two point one:2']);
 });
 
 await test('no runtime errors', async () => {

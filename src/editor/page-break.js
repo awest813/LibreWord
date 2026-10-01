@@ -4,6 +4,8 @@ import { TextSelection } from '@tiptap/pm/state';
 /** A hard page break. Pagination pushes whatever follows to the next page. */
 export const PageBreak = Node.create({
   name: 'pageBreak',
+  // Above HardBreak, which also binds Mod-Enter.
+  priority: 1000,
   group: 'block',
   atom: true,
   selectable: true,

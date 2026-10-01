@@ -118,6 +118,8 @@ export class EditorScreen {
       },
     });
     this.editorEl = this.editor.view.dom;
+    // Focus synchronously so keystrokes typed right after opening aren't lost.
+    this.editor.view.focus();
     this.editorEl.setAttribute('spellcheck', String(this.view.spellcheck));
     this.find.attach(this.editor);
     this.applyGeometry();
@@ -612,6 +614,8 @@ export class EditorScreen {
     this.zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
     this.zoomSlider.value = String(zoom <= 1 ? ((zoom - 0.1) / 0.9) * 50 : 50 + ((zoom - 1) / 4) * 50);
     if (this.view.layout === 'web') this.applyGeometry();
+    // Zoomed text can round to slightly different line heights; lay out again.
+    else if (old !== zoom) this.editor?.commands.repaginate();
     this.ruler.render();
     if (keepScroll && old !== zoom) c.scrollTop = centerRatio * c.scrollHeight - c.clientHeight / 2;
     this.applyView();
