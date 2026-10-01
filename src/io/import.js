@@ -129,7 +129,8 @@ export async function importFile(file) {
   const title = stripExtension(name);
   if (ext === 'docx') {
     const r = await importDocx(await file.arrayBuffer());
-    return { title: r.title || title, html: r.html, settings: r.settings, comments: r.comments };
+    // The file name wins: Word's stored title is often left over from a template.
+    return { title, html: r.html, settings: r.settings, comments: r.comments };
   }
   if (ext === 'md' || ext === 'markdown') return { title, html: await markdownToHtml(await file.text()) };
   if (ext === 'html' || ext === 'htm') {

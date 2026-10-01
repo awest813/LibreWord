@@ -79,7 +79,7 @@ export function documentList({ onOpen, compact = false }) {
       return;
     }
     const table = h('table', { class: 'doc-table' });
-    table.append(h('thead', {}, h('tr', {}, h('th', {}, 'Name'), h('th', { class: 'col-date' }, 'Modified'), h('th', { class: 'col-date' }, 'Words'), h('th', {}))));
+    table.append(h('thead', {}, h('tr', {}, h('th', {}, 'Name'), h('th', { class: 'col-date' }, 'Modified'), h('th', { class: 'col-date' }, 'Words'), h('th', {}, h('span', { class: 'visually-hidden' }, 'Actions')))));
     const tbody = h('tbody', {});
     for (const d of shown) {
       const more = h('button', { type: 'button', class: 'icon-btn', 'aria-label': `More actions for ${d.title}`, html: icon('more') });

@@ -14,7 +14,7 @@ describe('docx import of Word-authored files', () => {
   });
   it('character formatting', async () => {
     expect((await readDocx(fixture('underline.docx'))).html).toContain('<strong><u>Sunset</u></strong>');
-    expect((await readDocx(fixture('strikethrough.docx'))).html).toContain("<s>Today's Special: Salmon</s>");
+    expect((await readDocx(fixture('strikethrough.docx'))).html).toContain('<s>Today&#39;s Special: Salmon</s>');
   });
   it('images', async () => {
     expect((await readDocx(fixture('tiny-picture.docx'))).html).toMatch(/<img src="data:image\/png;base64,[^"]+" width="10" height="10">/);
@@ -26,7 +26,8 @@ describe('docx import of Word-authored files', () => {
   });
   it('footnotes and endnotes', async () => {
     const r = await readDocx(fixture('footnotes.docx'));
-    expect(r.html).toContain('<sup><a href="#note-1">1</a></sup>');
+    expect(r.html).toContain('Ouch<sup>1</sup>.<sup>2</sup>');
+    expect(r.html).not.toMatch(/<h\d>Notes/); // stays out of the TOC
     expect(r.html).toContain('A tachyon walks into a bar.');
     expect((await readDocx(fixture('endnotes.docx'))).html).toContain('Fin.');
   });

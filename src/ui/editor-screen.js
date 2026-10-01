@@ -250,7 +250,7 @@ export class EditorScreen {
     });
 
     const titlebar = h(
-      'header',
+      'div',
       { class: 'titlebar' },
       h('button', {
         type: 'button',
@@ -324,9 +324,8 @@ export class EditorScreen {
     this.screen = h(
       'div',
       { class: 'editor-screen' },
-      titlebar,
-      this.ribbon.el,
-      h('div', { class: 'workspace' }, this.nav.el, this.canvas, this.commentsPane.el, this.find.el),
+      h('header', { class: 'app-header' }, titlebar, this.ribbon.el),
+      h('main', { class: 'workspace' }, this.nav.el, this.canvas, this.commentsPane.el, this.find.el),
       statusbar,
       focusExit,
     );

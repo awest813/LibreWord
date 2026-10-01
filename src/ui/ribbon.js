@@ -69,10 +69,13 @@ export class Ribbon {
     this.updaters = [];
     this.current = 'home';
     this.collapsed = false;
-    this.el = h('div', { class: 'ribbon-wrap' });
+    this.el = h('div', { class: 'ribbon-wrap', role: 'region', 'aria-label': 'Ribbon' });
     this.tabsEl = h('div', { class: 'ribbon-tabs', role: 'tablist', 'aria-label': 'Ribbon' });
     this.bodyEl = h('div', { class: 'ribbon', role: 'tabpanel' });
-    this.el.append(this.tabsEl, this.bodyEl);
+    // The tablist holds only tabs; the collapse toggle sits beside it.
+    this.collapseBtn = h('button', { type: 'button', class: 'icon-btn ribbon-collapse', title: 'Collapse the ribbon (Ctrl+F1)', 'aria-label': 'Collapse the ribbon', 'aria-expanded': 'true', html: icon('chevronUp') });
+    this.collapseBtn.addEventListener('click', () => this.toggleCollapsed());
+    this.el.append(h('div', { class: 'ribbon-tabbar' }, this.tabsEl, this.collapseBtn), this.bodyEl);
     this.tabs = this.defineTabs();
     this.renderTabs();
     this.renderBody();
@@ -274,7 +277,7 @@ export class Ribbon {
   }
 
   styleGallery() {
-    const gallery = h('div', { class: 'style-gallery', role: 'listbox', 'aria-label': 'Styles' });
+    const gallery = h('div', { class: 'style-gallery-items', role: 'listbox', 'aria-label': 'Styles' });
     const card = (s) => {
       const c = h(
         'button',
@@ -298,7 +301,9 @@ export class Ribbon {
       panel.querySelector(`[data-style="${id}"]`)?.classList.add('is-active');
       showPopover(more, panel, { placement: 'bottom-end' });
     });
-    gallery.append(...visible, more);
+    // The listbox holds only style options; "More styles" sits beside it.
+    gallery.append(...visible);
+    const wrap = h('div', { class: 'style-gallery' }, gallery, more);
     this.updaters.push(() => {
       const id = activeStyleId(this.editor);
       for (const c of visible) {
@@ -307,7 +312,7 @@ export class Ribbon {
         c.setAttribute('aria-selected', String(on));
       }
     });
-    return gallery;
+    return wrap;
   }
 
   tablePicker() {
@@ -703,11 +708,6 @@ export class Ribbon {
       tabs[next].focus();
       if (tabs[next].dataset.tab) this.select(tabs[next].dataset.tab);
     });
-    this.tabsEl.append(h('div', { class: 'ribbon-tabs-spacer' }));
-    const collapse = h('button', { type: 'button', class: 'icon-btn', title: 'Collapse the ribbon (Ctrl+F1)', 'aria-label': 'Collapse the ribbon', html: icon('chevronUp') });
-    collapse.addEventListener('click', () => this.toggleCollapsed());
-    this.collapseBtn = collapse;
-    this.tabsEl.append(collapse);
   }
 
   toggleCollapsed() {
@@ -715,6 +715,8 @@ export class Ribbon {
     this.bodyEl.classList.toggle('is-collapsed', this.collapsed);
     this.collapseBtn.innerHTML = icon(this.collapsed ? 'chevronDown' : 'chevronUp');
     this.collapseBtn.title = this.collapsed ? 'Expand the ribbon' : 'Collapse the ribbon';
+    this.collapseBtn.setAttribute('aria-label', this.collapseBtn.title);
+    this.collapseBtn.setAttribute('aria-expanded', String(!this.collapsed));
     this.app.onChromeResize?.();
   }
 

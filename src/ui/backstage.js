@@ -18,6 +18,7 @@ export function openBackstage(app, section = 'info') {
   closePopover();
   const close = () => {
     el.remove();
+    document.getElementById('app')?.removeAttribute('inert');
     document.removeEventListener('keydown', onKey, true);
     app.editor?.commands.focus();
   };
@@ -29,7 +30,7 @@ export function openBackstage(app, section = 'info') {
     }
   };
 
-  const main = h('main', { class: 'backstage-main' });
+  const main = h('section', { class: 'backstage-main' });
   const sections = {
     home: { label: 'Home', icon: 'home', render: () => [h('h1', {}, 'Good to see you'), templateCards({ onTemplate: (t) => { close(); app.nav_.onNewDoc(t); }, onImport: importFile }), documentList({ onOpen: openDoc, compact: true }).el] },
     new: { label: 'New', icon: 'newDoc', render: () => [h('h1', {}, 'New'), templateCards({ onTemplate: (t) => { close(); app.nav_.onNewDoc(t); } })] },
@@ -148,6 +149,8 @@ export function openBackstage(app, section = 'info') {
   );
   const el = h('div', { class: 'backstage', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'File' }, nav, main);
   document.body.append(el);
+  // Keep keyboard and screen-reader focus inside the backstage while it's open.
+  document.getElementById('app')?.setAttribute('inert', '');
   document.addEventListener('keydown', onKey, true);
   select(sections[section] ? section : 'info');
   navButtons[section]?.focus();

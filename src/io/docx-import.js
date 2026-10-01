@@ -6,6 +6,7 @@
  */
 import JSZip from 'jszip';
 import { PAGE_SIZES, TWIPS_PER_PX } from '../editor/page-setup.js';
+import { escapeHtml } from '../ui/dom.js';
 
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const W_STRICT = 'http://purl.oclc.org/ooxml/wordprocessingml/main';
@@ -21,7 +22,9 @@ const HIGHLIGHT = {
 const PARAGRAPH_STYLE_IDS = { title: 'title', subtitle: 'subtitle', quote: 'quote', 'intense quote': 'intense-quote', caption: 'caption', 'no spacing': 'no-spacing' };
 
 // ---------------------------------------------------------------- XML helpers
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const esc = escapeHtml;
+// Marks a hard page break inside paragraph HTML so the paragraph can be split there.
+const PAGE_BREAK = '\u0000PB\u0000';
 const kids = (el, name) => (el ? [...el.children].filter((c) => !name || c.localName === name) : []);
 const kid = (el, name) => (el ? [...el.children].find((c) => c.localName === name) || null : null);
 // Transitional and Strict OOXML use different namespace URIs for the same attributes.
@@ -81,8 +84,10 @@ function readRunProps(rPr) {
   if (i !== undefined) p.italic = i;
   const u = kid(rPr, 'u');
   if (u) p.underline = val(u) !== 'none';
-  const strike = onOff(kid(rPr, 'strike')) || onOff(kid(rPr, 'dstrike'));
-  if (strike !== undefined) p.strike = strike;
+  // Read both so an explicit <w:strike w:val="0"/> can switch off a style's strikethrough.
+  const strike = onOff(kid(rPr, 'strike'));
+  const dstrike = onOff(kid(rPr, 'dstrike'));
+  if (strike !== undefined || dstrike !== undefined) p.strike = Boolean(strike || dstrike);
   const caps = onOff(kid(rPr, 'caps'));
   if (caps !== undefined) p.caps = caps;
   const va = val(kid(rPr, 'vertAlign'));
@@ -133,13 +138,13 @@ function readParaProps(pPr) {
   }
   const numPr = kid(pPr, 'numPr');
   if (numPr) {
+    // Either may be inherited from the paragraph style, so only set what's present.
     const numId = val(kid(numPr, 'numId'));
-    p.numId = numId;
-    p.ilvl = num(val(kid(numPr, 'ilvl'))) || 0;
+    const ilvl = num(val(kid(numPr, 'ilvl')));
+    if (numId != null) p.numId = numId;
+    if (ilvl != null) p.ilvl = ilvl;
   }
   if (onOff(kid(pPr, 'pageBreakBefore'))) p.pageBreakBefore = true;
-  const rPr = kid(pPr, 'rPr');
-  if (rPr) p.markRun = readRunProps(rPr);
   return p;
 }
 
@@ -183,7 +188,7 @@ function readStyles(xml) {
 
 function readNumbering(xml) {
   const nums = new Map();
-  if (!xml) return { kind: () => 'ul', start: () => 1 };
+  if (!xml) return { kind: () => 'ul', start: () => 1, exists: () => false };
   const doc = parseXml(xml);
   const abstract = new Map();
   for (const a of deep(doc, 'abstractNum')) {
@@ -191,9 +196,16 @@ function readNumbering(xml) {
     for (const l of kids(a, 'lvl')) levels.set(num(wattr(l, 'ilvl')) || 0, { fmt: val(kid(l, 'numFmt')) || 'bullet', start: num(val(kid(l, 'start'))) ?? 1 });
     abstract.set(wattr(a, 'abstractNumId'), levels);
   }
+  const overrides = new Map();
   for (const n of deep(doc, 'num')) {
     const levels = abstract.get(val(kid(n, 'abstractNumId')));
-    if (levels) nums.set(wattr(n, 'numId'), levels);
+    if (!levels) continue;
+    const id = wattr(n, 'numId');
+    nums.set(id, levels);
+    for (const o of kids(n, 'lvlOverride')) {
+      const start = num(val(kid(o, 'startOverride')));
+      if (start != null) overrides.set(`${id}:${num(wattr(o, 'ilvl')) || 0}`, start);
+    }
   }
   const level = (numId, ilvl) => nums.get(numId)?.get(ilvl) || nums.get(numId)?.get(0);
   return {
@@ -201,7 +213,7 @@ function readNumbering(xml) {
       const fmt = level(numId, ilvl)?.fmt || 'bullet';
       return fmt === 'bullet' || fmt === 'none' ? 'ul' : 'ol';
     },
-    start: (numId, ilvl) => level(numId, ilvl)?.start ?? 1,
+    start: (numId, ilvl) => overrides.get(`${numId}:${ilvl}`) ?? level(numId, ilvl)?.start ?? 1,
     exists: (numId) => nums.has(numId) && numId !== '0',
   };
 }
@@ -245,6 +257,7 @@ class DocxReader {
     this.fieldStack = [];
     this.pendingBlocks = [];
     this.noteList = []; // footnote/endnote texts in reference order
+    this.listCounters = new Map(); // "numId:level" → next number, so lists continue across interruptions
   }
 
   /** Effective run formatting → HTML-wrapped text. */
@@ -261,7 +274,8 @@ class DocxReader {
     const css = [];
     if (props.color) css.push(`color: ${props.color}`);
     if (props.size && Math.abs(props.size - 11) > 0.01) css.push(`font-size: ${props.size}pt`);
-    if (props.font && !/^(calibri|\+minor|\+major)/i.test(props.font)) css.push(`font-family: ${esc(props.font.includes(' ') ? `'${props.font}'` : props.font)}`);
+    const font = props.font?.replace(/['"\\;{}<>]/g, '').trim();
+    if (font && !/^(calibri|\+minor|\+major)/i.test(font)) css.push(`font-family: ${esc(font.includes(' ') ? `'${font}'` : font)}`);
     if (css.length) out = `<span style="${css.join('; ')}">${out}</span>`;
     if (props.highlight) out = `<mark data-color="${props.highlight}" style="background-color: ${props.highlight}">${out}</mark>`;
     for (const id of this.openComments) out = `<span data-comment-id="${esc(id)}">${out}</span>`;
@@ -325,6 +339,7 @@ class DocxReader {
           break;
         }
         case 'ins':
+        case 'moveTo':
         case 'smartTag':
         case 'customXml':
         case 'sdtContent':
@@ -336,7 +351,7 @@ class DocxReader {
           out += this.inline(kid(node, 'sdtContent'), base, opts);
           break;
         default:
-          break; // del, bookmarks, proofErr, permStart… carry no visible content
+          break; // del, moveFrom, bookmarks, proofErr, permStart… carry no visible content
       }
     }
     return out;
@@ -372,7 +387,7 @@ class DocxReader {
         case 'br':
         case 'cr':
           flush();
-          if (wattr(c, 'type') === 'page') opts.pageBreak = true;
+          if (wattr(c, 'type') === 'page') out += PAGE_BREAK;
           else if (!this.inToc) out += '<br>';
           break;
         case 'lastRenderedPageBreak':
@@ -396,7 +411,7 @@ class DocxReader {
           if (note != null) {
             this.noteList.push(note);
             const n = this.noteList.length;
-            out += `<sup><a href="#note-${n}">${n}</a></sup>`;
+            out += `<sup>${n}</sup>`;
           }
           break;
         }
@@ -444,7 +459,7 @@ class DocxReader {
     // LibreWord's heading look unless the run is formatted directly.
     const styled = Boolean(level || named);
     const baseRun = styled ? {} : { ...this.styleSheet.defaults.run, ...style.run };
-    const opts = { inHeading: Boolean(level), pageBreak: false };
+    const opts = { inHeading: Boolean(level) };
     const wasInToc = this.inToc;
     const pending = this.pendingBlocks;
     this.pendingBlocks = [];
@@ -460,8 +475,7 @@ class DocxReader {
       this.tocEmitted = true;
       blocks.push({ html: '<nav data-toc></nav>' });
     }
-    const onlyBreak = opts.pageBreak && !content.replace(/<[^>]+>/g, '').trim() && !/<img/.test(content);
-    if (!tocParagraph && !onlyBreak) {
+    if (!tocParagraph) {
       // Headings and named styles (Title, Quote…) look right from LibreWord's own
       // CSS, so only their direct formatting is kept. For body text the
       // effective formatting is kept unless it matches LibreWord's defaults.
@@ -480,14 +494,21 @@ class DocxReader {
       const tag = level ? `h${level}` : 'p';
       const dataStyle = !level && named ? ` data-style="${named}"` : '';
       const body = task ? content.replace(/[☐☒]\s/, '') : content;
-      blocks.push({
-        html: `<${tag}${dataStyle}${style}>${body}</${tag}>`,
-        list: listed ? { numId: props.numId, ilvl: props.ilvl || 0 } : null,
-        task,
+      // A page break inside the paragraph splits it, so text after the break
+      // starts the next page (Word often puts a chapter's break at its start).
+      const parts = body.split(PAGE_BREAK);
+      const isEmpty = (h) => !h.replace(/<(?!img)[^>]+>/g, '').trim();
+      parts.forEach((part, i) => {
+        if (i > 0) blocks.push({ html: '<div data-page-break></div>' });
+        if (parts.length > 1 && isEmpty(part)) return;
+        blocks.push({
+          html: `<${tag}${dataStyle}${style}>${part}</${tag}>`,
+          list: listed ? { numId: props.numId, ilvl: props.ilvl || 0 } : null,
+          task,
+        });
       });
     }
     blocks.push(...boxes);
-    if (opts.pageBreak) blocks.push({ html: '<div data-page-break></div>' });
     return blocks;
   }
 
@@ -557,18 +578,19 @@ class DocxReader {
           break;
         case 'customXml':
         case 'ins':
+        case 'moveTo':
           out.push({ html: this.blocks(kids(el)) });
           break;
         default:
           break;
       }
     }
-    return assembleLists(out, this.numbering);
+      return assembleLists(out, this.numbering, this.listCounters);
   }
 }
 
 /** Group consecutive list paragraphs into nested <ul>/<ol> by numId and level. */
-function assembleLists(blocks, numbering) {
+function assembleLists(blocks, numbering, counters = new Map()) {
   let html = '';
   let i = 0;
   while (i < blocks.length) {
@@ -589,13 +611,14 @@ function assembleLists(blocks, numbering) {
     }
     const run = [];
     while (i < blocks.length && blocks[i].list) run.push(blocks[i++]);
-    html += buildList(run, numbering);
+    html += buildList(run, numbering, counters);
   }
   return html;
 }
 
-function buildList(items, numbering) {
+function buildList(items, numbering, counters) {
   let html = '';
+  const next = (numId, level) => counters.get(`${numId}:${level}`) ?? numbering.start(numId, level);
   const stack = []; // open lists, innermost last: { tag, level, numId, hasItem }
   for (const it of items) {
     const { ilvl: level, numId } = it.list;
@@ -609,7 +632,7 @@ function buildList(items, numbering) {
     if (!top || top.level < level) {
       // Opens nested inside the parent's still-open <li>.
       const tag = numbering.kind(numId, level);
-      const start = tag === 'ol' ? numbering.start(numId, level) : 1;
+      const start = tag === 'ol' ? next(numId, level) : 1;
       html += `<${tag}${start !== 1 ? ` start="${start}"` : ''}>`;
       top = { tag, level, numId, hasItem: false };
       stack.push(top);
@@ -617,6 +640,12 @@ function buildList(items, numbering) {
     if (top.hasItem) html += '</li>';
     html += `<li>${it.html}`;
     top.hasItem = true;
+    counters.set(`${numId}:${level}`, next(numId, level) + 1);
+    // As in Word, a new item restarts the numbering of the levels below it.
+    for (const key of [...counters.keys()]) {
+      const [id, l] = key.split(':');
+      if (id === numId && Number(l) > level) counters.delete(key);
+    }
   }
   while (stack.length) html += `</li></${stack.pop().tag}>`;
   return html;
@@ -634,15 +663,63 @@ function readNotes(xml, tag) {
   return out;
 }
 
+/**
+ * Header/footer text with fields replaced by placeholders. Page-number fields
+ * (and the words around them, e.g. "Page 1 of 3" / "Seite 1 von 3") are
+ * dropped because LibreWord draws its own page numbers.
+ */
 function headerFooterText(xml) {
   if (!xml) return { text: '', pageField: false };
   const doc = parseXml(xml);
-  const instr = deep(doc, 'instrText').map((e) => e.textContent).join(' ') + deep(doc, 'fldSimple').map((e) => wattr(e, 'instr')).join(' ');
-  const pageField = /\bPAGE\b|\bNUMPAGES\b/.test(instr);
-  const paras = deep(doc, 'p').map((p) => deep(p, 't').map((t) => t.textContent).join('').trim()).filter(Boolean);
-  let text = paras.join('   ');
-  // Drop the static parts of "Page X of Y" so they don't duplicate LibreWord's own numbering.
-  if (pageField) text = text.replace(/\bPage\s*\d*\s*(of\s*\d*)?/i, '').trim();
+  let pageField = false;
+  const fieldToken = (instr) => {
+    const m = /^\s*(PAGE|NUMPAGES|SECTIONPAGES)\b/i.exec(instr || '');
+    if (!m) return null;
+    pageField = true;
+    return m[1].toUpperCase() === 'PAGE' ? '{PAGE}' : '{NUMPAGES}';
+  };
+  const paraText = (p) => {
+    let text = '';
+    const stack = []; // { instr, inResult }
+    const walk = (el) => {
+      for (const c of kids(el)) {
+        const name = c.localName;
+        if (name === 'fldSimple') {
+          text += fieldToken(wattr(c, 'instr')) ?? deep(c, 't').map((t) => t.textContent).join('');
+        } else if (name === 'fldChar') {
+          const type = wattr(c, 'fldCharType');
+          if (type === 'begin') stack.push({ instr: '', inResult: false });
+          else if (type === 'separate' && stack.length) {
+            const f = stack[stack.length - 1];
+            f.inResult = true;
+            const token = fieldToken(f.instr);
+            if (token) {
+              text += token;
+              f.skip = true;
+            }
+          } else if (type === 'end') stack.pop();
+        } else if (name === 'instrText') {
+          if (stack.length) stack[stack.length - 1].instr += c.textContent;
+        } else if (name === 't') {
+          if (!stack.some((f) => f.skip)) text += c.textContent;
+        } else if (name === 'tab') {
+          text += ' ';
+        } else if (!['rPr', 'pPr', 'del', 'moveFrom'].includes(name)) {
+          walk(c);
+        }
+      }
+    };
+    walk(p);
+    return text.trim();
+  };
+  let text = deep(doc, 'p').map(paraText).filter(Boolean).join('   ');
+  if (pageField) {
+    text = text
+      .replace(/\S*\s*\{PAGE\}(\s*\S+\s*\{NUMPAGES\})?/g, '')
+      .replace(/\S*\s*\{NUMPAGES\}/g, '')
+      .replace(/\s{2,}/g, '   ')
+      .trim();
+  }
   return { text, pageField };
 }
 
@@ -741,7 +818,8 @@ export async function readDocx(arrayBuffer) {
   let html = reader.blocks(kids(body));
   // LibreWord has no footnote layout yet: notes are listed at the end, linked from their markers.
   if (reader.noteList.length) {
-    html += '<hr><h2>Notes</h2>';
+    // A bold paragraph rather than a heading, so it stays out of the TOC.
+    html += '<hr><p><strong>Notes</strong></p>';
     reader.noteList.forEach((text, i) => {
       html += `<p data-style="caption"><sup>${i + 1}</sup> ${esc(text)}</p>`;
     });
