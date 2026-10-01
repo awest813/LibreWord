@@ -3,6 +3,8 @@ import { icon } from './icons.js';
 import { EXPORT_FORMATS } from '../io/export.js';
 import { templateCards, documentList, pickFile } from './start.js';
 import { PAGE_SIZES, formatLength } from '../editor/page-setup.js';
+import { listVersions } from '../storage/db.js';
+import { confirmDialog } from './dialog.js';
 
 const EXPORT_HINTS = {
   docx: 'Opens in Microsoft Word, Google Docs, LibreOffice and Pages',
@@ -33,6 +35,7 @@ export function openBackstage(app, section = 'info') {
     new: { label: 'New', icon: 'newDoc', render: () => [h('h1', {}, 'New'), templateCards({ onTemplate: (t) => { close(); app.nav_.onNewDoc(t); } })] },
     open: { label: 'Open', icon: 'open', render: () => [h('h1', {}, 'Open'), h('button', { type: 'button', class: 'btn btn-primary', onclick: importFile, html: `${icon('upload')} Browse this device…` }), documentList({ onOpen: openDoc }).el] },
     info: { label: 'Info', icon: 'info', render: info },
+    history: { label: 'Version History', icon: 'clock', render: history },
     export: { label: 'Save a Copy', icon: 'download', render: exportSection },
     print: { label: 'Print', icon: 'print', render: () => { close(); app.print(); return []; } },
   };
@@ -73,6 +76,37 @@ export function openBackstage(app, section = 'info') {
         h('button', { type: 'button', class: 'btn', onclick: () => { close(); app.shortcutsDialog(); } }, 'Keyboard Shortcuts'),
       ),
     ];
+  }
+
+  function history() {
+    const body = h('div', { class: 'version-list' }, h('p', { class: 'muted' }, 'Loading…'));
+    const REASONS = { opened: 'Before editing session', auto: 'Autosaved', 'before-restore': 'Before restoring a version' };
+    listVersions(app.docId).then((versions) => {
+      body.replaceChildren();
+      if (!versions.length) {
+        body.append(h('p', { class: 'muted' }, 'No earlier versions yet. LibreWord keeps the state of the document from before each editing session, plus a snapshot every 10 minutes while you work.'));
+        return;
+      }
+      for (const v of versions) {
+        body.append(h(
+          'div',
+          { class: 'version-row' },
+          h('div', {}, h('b', {}, new Date(v.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })), h('small', {}, `${REASONS[v.reason] || 'Snapshot'} · ${v.title || 'Untitled'} · ${(v.words || 0).toLocaleString()} words`)),
+          h('div', { class: 'version-actions' },
+            h('button', { type: 'button', class: 'btn', onclick: () => { close(); app.openVersionAsCopy(v.vid); } }, 'Open copy'),
+            h('button', {
+              type: 'button',
+              class: 'btn btn-primary',
+              onclick: async () => {
+                if (!(await confirmDialog('Replace the current document with this version? The current state is kept in version history.', { title: 'Restore version', confirmLabel: 'Restore' }))) return;
+                close();
+                app.restoreVersion(v.vid);
+              },
+            }, 'Restore')),
+        ));
+      }
+    });
+    return [h('h1', {}, 'Version History'), body];
   }
 
   function exportSection() {

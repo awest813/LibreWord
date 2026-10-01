@@ -1,7 +1,7 @@
 import { TextSelection } from '@tiptap/pm/state';
 import { createEditor } from '../editor/create-editor.js';
 import { pageGeometry, PAGE_SIZES, PX_PER_IN, PX_PER_CM, PX_PER_PT, usesInches } from '../editor/page-setup.js';
-import { getDoc, saveDoc } from '../storage/db.js';
+import { getDoc, saveDoc, addVersion, getVersion, createDoc } from '../storage/db.js';
 import { exportDocument, printCss, printDocument } from '../io/export.js';
 import { sanitizeHtml } from '../io/import.js';
 import { h, toast, debounce, isPopoverOpen, closePopover } from './dom.js';
@@ -87,6 +87,10 @@ export class EditorScreen {
     this.settings = doc.settings;
     this.createdAt = doc.createdAt;
     this.comments = doc.comments || {};
+    // The state the document was opened in: saved to version history the
+    // first time this session changes it.
+    this.openState = { title: doc.title, json: doc.json, html: doc.html, settings: doc.settings, comments: this.comments, words: doc.words, createdAt: doc.updatedAt };
+    this.lastVersionAt = 0;
     this.buildChrome();
     this.applyView();
 
@@ -96,7 +100,7 @@ export class EditorScreen {
       getGeometry: () => (this.view.layout === 'print' ? this.geometry : null),
       onLayout: ({ pageCount }) => this.onLayout(pageCount),
       getPageOf: (pos) => this.pageOfPos(pos),
-      onUpdate: () => this.onDocChange(),
+      onUpdate: ({ transaction }) => this.onDocChange(transaction),
       onSelectionUpdate: () => this.onSelectionChange(),
       onTransaction: () => this.scheduleUiUpdate(),
       editorProps: {
@@ -404,7 +408,9 @@ export class EditorScreen {
     });
   }
 
-  onDocChange() {
+  onDocChange(transaction) {
+    // Plugin housekeeping (e.g. the trailing paragraph) isn't a user edit.
+    if (!transaction?.getMeta('appendedTransaction')) this.userEdited = true;
     this.setSaveState('unsaved');
     this.queueSave();
     this.statsDebounced();
@@ -488,6 +494,7 @@ export class EditorScreen {
     this.saving = saveDoc(this.docId, { json: this.editor.getJSON(), preview, words: this.words, title: this.title, settings: this.settings, comments: this.comments })
       .then(() => {
         this.setSaveState('saved');
+        this.maybeSnapshot();
         channel?.postMessage({ type: 'saved', id: this.docId, tab: TAB_ID });
         if (announce) toast('Saved to this device', { type: 'success', timeout: 1800 });
       })
@@ -504,6 +511,52 @@ export class EditorScreen {
         }
       });
     return this.saving;
+  }
+
+  /** Version history: keep the opening state, then a snapshot every 10 minutes of editing. */
+  async maybeSnapshot() {
+    if (!this.userEdited) return;
+    try {
+      if (!this.openSnapshotted) {
+        this.openSnapshotted = true;
+        this.lastVersionAt = Date.now();
+        const o = this.openState;
+        if (o.json || (o.html && o.html !== '<p></p>')) await addVersion(this.docId, { ...o, reason: 'opened' });
+      } else if (Date.now() - this.lastVersionAt > 10 * 60 * 1000) {
+        this.lastVersionAt = Date.now();
+        await addVersion(this.docId, this.currentState('auto'));
+      }
+    } catch (err) {
+      console.warn('Version snapshot failed', err);
+    }
+  }
+
+  currentState(reason) {
+    return { title: this.title, json: this.editor.getJSON(), settings: this.settings, comments: this.comments, words: this.words ?? 0, createdAt: Date.now(), reason };
+  }
+
+  async restoreVersion(vid) {
+    const v = await getVersion(vid);
+    if (!v) return;
+    await this.flush();
+    await addVersion(this.docId, this.currentState('before-restore'));
+    this.comments = v.comments || {};
+    this.settings = { ...this.settings, ...(v.settings || {}) };
+    this.editor.commands.setContent(v.json || sanitizeHtml(v.html) || '<p></p>', { emitUpdate: true });
+    this.rename(v.title || this.title);
+    this.applyGeometry();
+    this.ruler.render();
+    this.commentsPane.render();
+    this.applyView();
+    await this.saveNow();
+    toast(`Restored the version from ${new Date(v.createdAt).toLocaleString()}`, { type: 'success' });
+  }
+
+  async openVersionAsCopy(vid) {
+    const v = await getVersion(vid);
+    if (!v) return;
+    const id = await createDoc({ title: `${v.title || this.title} (${new Date(v.createdAt).toLocaleDateString()})`, json: v.json, html: v.html, settings: v.settings, comments: v.comments });
+    this.nav_.onOpenDoc(id);
   }
 
   async flush() {

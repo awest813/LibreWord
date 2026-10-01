@@ -520,6 +520,12 @@ button.sb-item:hover { background: var(--surface-hover); }
 .info-grid dt { color: var(--text-muted); }
 .info-grid dd { margin: 0; }
 .export-list { display: grid; gap: 8px; max-width: 520px; }
+.version-list { display: grid; gap: 8px; max-width: 720px; }
+.version-list .muted, .backstage-main .muted { color: var(--text-muted); }
+.version-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); }
+.version-row b { display: block; font-weight: 600; }
+.version-row small { color: var(--text-muted); }
+.version-actions { display: flex; gap: 8px; flex: 0 0 auto; }
 .export-option { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); text-align: left; }
 .export-option:hover { border-color: var(--accent); background: var(--accent-soft); }
 .export-option b { display: block; }

@@ -284,6 +284,7 @@ await test('insert a link through the dialog', async () => {
   await page.keyboard.press('Control+k');
   await page.fill('dialog input[name="href"]', 'example.com');
   await page.press('dialog input[name="href"]', 'Enter');
+  await page.waitForFunction(() => window.libreword.editor.getHTML().includes('<a '));
   const html = await page.evaluate(() => window.libreword.editor.getHTML());
   assert.match(html, /<a [^>]*href="https:\/\/example\.com"[^>]*>example<\/a>/);
 });
@@ -373,6 +374,50 @@ await test('comments: add, reply, resolve, persist and export', async () => {
   assert.match(xml, /Yes, keep it\./);
   await page.click('.comment-card button[aria-label="Delete comment"]');
   assert.doesNotMatch(await page.evaluate(() => window.libreword.editor.getHTML()), /data-comment-id/);
+});
+
+await test('version history restores the pre-edit state', async () => {
+  await page.click('.app-logo');
+  await page.click('.template-card >> nth=1'); // Letter
+  await editorReady();
+  const original = await page.evaluate(() => window.libreword.editor.getText());
+  await page.evaluate(() => window.libreword.editor.commands.setContent('<p>Completely rewritten.</p>'));
+  await page.keyboard.press('Control+s');
+  await sleep(400);
+  await page.click('.ribbon-tab.is-file');
+  await page.click('.backstage-nav button:has-text("Version History")');
+  await page.waitForSelector('.version-row');
+  await page.click('.version-row .btn-primary');
+  await page.click('dialog .btn-primary');
+  await page.waitForFunction((t) => window.libreword.editor.getText() === t, original);
+  // The rewritten state was kept as a version too.
+  await page.click('.ribbon-tab.is-file');
+  await page.click('.backstage-nav button:has-text("Version History")');
+  await page.waitForSelector('.version-row:has-text("Before restoring")');
+  await page.keyboard.press('Escape');
+});
+
+await test('documents from LibreWord v1 are migrated', async () => {
+  const ctx2 = await browser.newContext();
+  const p2 = await ctx2.newPage();
+  p2.on('pageerror', (e) => errors.push(e.message));
+  await p2.goto(`${BASE}favicon.svg`); // same origin, app not loaded
+  await p2.evaluate(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open('libreword', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('documents', { keyPath: 'id', autoIncrement: true });
+    req.onsuccess = () => {
+      const tx = req.result.transaction('documents', 'readwrite');
+      tx.objectStore('documents').add({ title: 'Old Quill doc', content: '<p>Written in <strong>v1</strong></p>', createdAt: 1, updatedAt: 2 });
+      tx.oncomplete = () => { req.result.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+    req.onerror = () => reject(req.error);
+  }));
+  await p2.goto(BASE);
+  await p2.waitForSelector('.doc-row:has-text("Old Quill doc")');
+  await p2.click('.doc-row:has-text("Old Quill doc")');
+  await p2.waitForFunction(() => window.libreword?.editor?.getHTML().includes('<strong>v1</strong>'));
+  await ctx2.close();
 });
 
 await test('no runtime errors', async () => {

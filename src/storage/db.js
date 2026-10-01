@@ -4,10 +4,12 @@ import { openDB } from 'idb';
  * Documents are split across two object stores:
  *   meta    – small records used by the document list (title, dates, preview…)
  *   content – the full editor JSON / HTML and per-document settings
+ *   versions – periodic snapshots for version history
  * so the start screen never has to load every document body.
  */
 const DB_NAME = 'libreword';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
+const MAX_VERSIONS = 40;
 
 export const DEFAULT_SETTINGS = Object.freeze({
   pageSize: 'letter',
@@ -38,6 +40,10 @@ export const getDb = () => {
         }
         if (!db.objectStoreNames.contains('content')) {
           db.createObjectStore('content', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('versions')) {
+          const versions = db.createObjectStore('versions', { keyPath: 'vid', autoIncrement: true });
+          versions.createIndex('docId', 'docId');
         }
 
         // v1 (the original Quill-based LibreWord) kept HTML in a single
@@ -162,9 +168,46 @@ export async function renameDoc(id, title) {
 
 export async function deleteDoc(id) {
   const db = await getDb();
-  const tx = db.transaction(['meta', 'content'], 'readwrite');
-  await Promise.all([tx.objectStore('meta').delete(id), tx.objectStore('content').delete(id)]);
+  const tx = db.transaction(['meta', 'content', 'versions'], 'readwrite');
+  const versionKeys = await tx.objectStore('versions').index('docId').getAllKeys(id);
+  await Promise.all([
+    tx.objectStore('meta').delete(id),
+    tx.objectStore('content').delete(id),
+    ...versionKeys.map((k) => tx.objectStore('versions').delete(k)),
+  ]);
   await tx.done;
+}
+
+// ---------------------------------------------------------------------------
+// Version history
+// ---------------------------------------------------------------------------
+
+/** Store a snapshot; keeps the newest MAX_VERSIONS per document. */
+export async function addVersion(docId, { title, json, html = '', settings, comments, words = 0, createdAt = Date.now(), reason = 'auto' }) {
+  const db = await getDb();
+  const tx = db.transaction('versions', 'readwrite');
+  const store = tx.objectStore('versions');
+  await store.add({ docId, title, json, html, settings, comments, words, createdAt, reason });
+  const keys = await store.index('docId').getAllKeys(docId);
+  if (keys.length > MAX_VERSIONS) {
+    keys.sort((a, b) => a - b);
+    for (const k of keys.slice(0, keys.length - MAX_VERSIONS)) await store.delete(k);
+  }
+  await tx.done;
+}
+
+/** Version summaries, newest first (without the document bodies). */
+export async function listVersions(docId) {
+  const db = await getDb();
+  const all = await db.getAllFromIndex('versions', 'docId', docId);
+  return all
+    .map(({ vid, title, words, createdAt, reason }) => ({ vid, title, words, createdAt, reason }))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+
+export async function getVersion(vid) {
+  const db = await getDb();
+  return db.get('versions', vid);
 }
 
 export async function duplicateDoc(id) {
