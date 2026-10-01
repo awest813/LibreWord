@@ -25,6 +25,9 @@ export const newId = () =>
 
 const htmlToText = (html = '') => {
   const doc = new DOMParser().parseFromString(String(html), 'text/html');
+  // Keep words apart where lines and blocks meet ("Name<br>Street" → "Name Street").
+  doc.body.querySelectorAll('br').forEach((br) => br.replaceWith(' '));
+  doc.body.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, td, th, div').forEach((el) => el.append(' '));
   return (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
 };
 

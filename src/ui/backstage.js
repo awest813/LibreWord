@@ -1,4 +1,4 @@
-import { h, formatDate, closePopover } from './dom.js';
+import { h, closePopover } from './dom.js';
 import { icon } from './icons.js';
 import { EXPORT_FORMATS } from '../io/export.js';
 import { templateCards, documentList, pickFile } from './start.js';
@@ -62,7 +62,9 @@ export function openBackstage(app, section = 'info') {
     add('Title', app.title);
     add('Pages', app.view.layout === 'print' ? String(app.pageCount) : '—');
     add('Words', (app.words ?? 0).toLocaleString());
-    add('Created', app.createdAt ? `${formatDate(app.createdAt)} (${new Date(app.createdAt).toLocaleString()})` : '—');
+    const when = (ts) => (ts ? new Date(ts).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : '—');
+    add('Modified', when(app.savedAt));
+    add('Created', when(app.createdAt));
     add('Paper', `${size.label}, ${s.orientation}`);
     add('Margins', `${formatLength(s.margins.top)} top · ${formatLength(s.margins.bottom)} bottom · ${formatLength(s.margins.left)} left · ${formatLength(s.margins.right)} right`);
     add('Stored', 'On this device only (browser storage). Save a copy to back it up.');

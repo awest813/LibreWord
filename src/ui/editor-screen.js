@@ -86,6 +86,7 @@ export class EditorScreen {
     this.title = doc.title;
     this.settings = doc.settings;
     this.createdAt = doc.createdAt;
+    this.savedAt = doc.updatedAt;
     this.comments = doc.comments || {};
     // The state the document was opened in: saved to version history the
     // first time this session changes it.
@@ -516,6 +517,7 @@ export class EditorScreen {
           this.setSaveState('unsaved');
           this.queueSave();
         } else this.setSaveState('saved');
+        this.savedAt = Date.now();
         this.maybeSnapshot();
         channel?.postMessage({ type: 'saved', id: this.docId, tab: TAB_ID });
         if (announce) toast('Saved to this device', { type: 'success', timeout: 1800 });

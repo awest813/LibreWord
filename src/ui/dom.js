@@ -28,7 +28,13 @@ export const escapeHtml = (value = '') =>
 
 export const isMac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 export const modKey = isMac ? '⌘' : 'Ctrl';
-export const shortcutLabel = (s) => (s ? s.replace(/Mod/g, modKey).replace(/Shift/g, isMac ? '⇧' : 'Shift').replace(/Alt/g, isMac ? '⌥' : 'Alt') : '');
+/** "Mod-Shift-L" → "Ctrl+Shift+L" (or "⌘⇧L" on a Mac), like Word's menus. */
+export const shortcutLabel = (s) => {
+  if (!s) return '';
+  const label = s.replace(/Mod/g, modKey).replace(/Shift/g, isMac ? '⇧' : 'Shift').replace(/Alt/g, isMac ? '⌥' : 'Alt');
+  // Join modifier chains with "+" (Mac uses no separator); keep a literal trailing "-" key.
+  return label.replace(/(\S)-(?=\S)/g, isMac ? '$1' : '$1+');
+};
 
 // ---------------------------------------------------------------------------
 // Popovers (dropdown menus, galleries, colour pickers)
