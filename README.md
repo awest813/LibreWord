@@ -63,6 +63,7 @@ The included workflow (`.github/workflows/deploy.yml`) runs the tests and publis
 npm test                         # unit tests (Vitest): converters, search, parsing
 npm run build && npm run test:e2e   # end-to-end tests in headless Chromium
 npm run build && npm run bench      # editing benchmark on a large document
+npm run build && npm run test:a11y   # axe-core accessibility audit of every screen
 ```
 
 The end-to-end suite drives the real app: typing and formatting, the ribbon, undo/redo, pagination invariants (every rendered line must fall inside a page's content area, before and after edits), find & replace, persistence across reloads, `.docx` and Markdown export (the `.docx` is parsed back to verify it), Markdown import and page setup. It uses `playwright-core`; set `CHROME_PATH` to point at a Chromium binary, or run `npx playwright-core install chromium` first.
