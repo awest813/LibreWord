@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import assert from 'node:assert/strict';
 import mammoth from 'mammoth';
+import JSZip from 'jszip';
 
 import { startPreview, CHROME } from './server.mjs';
 
@@ -333,6 +334,45 @@ await test('table of contents lists headings with page numbers', async () => {
   await sleep(400);
   const entries = await page.$$eval('.toc-entry', (els) => els.map((e) => `${e.querySelector('.toc-text').textContent}:${e.querySelector('.toc-page').textContent}`));
   assert.deepEqual(entries, ['One:1', 'Two:2', 'Two point one:2']);
+});
+
+await test('comments: add, reply, resolve, persist and export', async () => {
+  await page.evaluate(() => {
+    const ed = window.libreword.editor;
+    ed.commands.setContent('<p>Please review this sentence carefully.</p>');
+    ed.commands.setTextSelection({ from: 8, to: 14 });
+    ed.commands.focus();
+  });
+  await settle();
+  await page.click('.ribbon-tab[data-tab="review"]');
+  await page.click('[data-cmd="new-comment"]');
+  await page.fill('dialog input[name="name"]', 'Ada Lovelace');
+  await page.press('dialog input[name="name"]', 'Enter');
+  await page.waitForSelector('.comment-card textarea');
+  await page.fill('.comment-card textarea', 'Is this the right word?');
+  await page.click('.comment-card .btn-primary');
+  await page.fill('.comment-reply-input', 'Yes, keep it.');
+  await page.press('.comment-reply-input', 'Enter');
+  await page.waitForSelector('.comment-reply');
+  assert.match(await page.evaluate(() => window.libreword.editor.getHTML()), /<span data-comment-id="[^"]+" class="lw-comment">review<\/span>/);
+  await page.keyboard.press('Control+s');
+  await sleep(300);
+  await page.reload();
+  await editorReady();
+  await page.waitForSelector('.comment-card');
+  assert.equal(await page.textContent('.comment-card .who strong'), 'Ada Lovelace');
+  assert.match(await page.textContent('.comment-card'), /Is this the right word\?.*Yes, keep it\./s);
+  await page.click('.comment-card button[aria-label="Resolve comment"]');
+  assert.match(await page.textContent('.comment-card .who small'), /Resolved/);
+  await page.click('.ribbon-tab.is-file');
+  await page.click('.backstage-nav button:has-text("Save a Copy")');
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('.export-option[data-format="docx"]')]);
+  const zip = await JSZip.loadAsync(await readFile(await download.path()));
+  const xml = await zip.file('word/comments.xml').async('string');
+  assert.match(xml, /Is this the right word\?/);
+  assert.match(xml, /Yes, keep it\./);
+  await page.click('.comment-card button[aria-label="Delete comment"]');
+  assert.doesNotMatch(await page.evaluate(() => window.libreword.editor.getHTML()), /data-comment-id/);
 });
 
 await test('no runtime errors', async () => {

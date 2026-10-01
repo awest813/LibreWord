@@ -155,3 +155,20 @@ describe('search', () => {
     expect(buildRegExp('(', { regex: true })).toBeNull();
   });
 });
+
+describe('docx comments', () => {
+  it('writes comment threads anchored to the commented text', async () => {
+    const JSZip = (await import('jszip')).default;
+    const mark = [{ type: 'comment', attrs: { id: 'c1' } }];
+    const doc = { type: 'doc', content: [p(t('Before '), t('commented', mark), t(' after'))] };
+    const comments = { c1: { id: 'c1', author: 'Ada Lovelace', initials: 'AL', date: 0, text: 'Check this', resolved: false, replies: [{ author: 'Bob', date: 0, text: 'Done' }] } };
+    const buf = await docxBuffer(doc, DEFAULT_SETTINGS, { comments });
+    const zip = await JSZip.loadAsync(buf);
+    const xml = await zip.file('word/comments.xml').async('string');
+    expect(xml).toContain('w:author="Ada Lovelace"');
+    expect(xml).toContain('Check this');
+    expect(xml).toContain('Done');
+    const body = await zip.file('word/document.xml').async('string');
+    expect(body).toMatch(/<w:commentRangeStart w:id="0"\/>.*commented.*<w:commentRangeEnd w:id="0"\/>/s);
+  });
+});

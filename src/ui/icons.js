@@ -10,7 +10,7 @@ import {
   BetweenHorizontalStart, BetweenHorizontalEnd, BetweenVerticalStart, BetweenVerticalEnd, TableCellsMerge,
   TableCellsSplit, Rows3, Columns3, ArrowLeft, Type, AArrowUp, AArrowDown, CaseUpper, BookOpen,
   Monitor, Focus, Files, PanelTop, PanelBottom, Hash, SpellCheck, Sigma, ScrollText, FileDown, SquareDashed,
-  Pencil, LayoutTemplate, Clock,
+  Pencil, LayoutTemplate, Clock, MessageSquarePlus, MessagesSquare,
 } from 'lucide';
 
 const ICONS = {
@@ -32,7 +32,7 @@ const ICONS = {
   growFont: AArrowUp, shrinkFont: AArrowDown, changeCase: CaseUpper, readMode: BookOpen, printLayout: FileText,
   webLayout: Monitor, focus: Focus, files: Files, header: PanelTop, footer: PanelBottom, pageNumber: Hash,
   spell: SpellCheck, wordCount: Sigma, outline: ScrollText, fileDown: FileDown, margins: SquareDashed,
-  rename: Pencil, template: LayoutTemplate, clock: Clock,
+  rename: Pencil, template: LayoutTemplate, clock: Clock, comment: MessageSquarePlus, comments: MessagesSquare,
 };
 
 const cache = new Map();

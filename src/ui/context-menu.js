@@ -53,6 +53,7 @@ export function showEditorContextMenu(app, event) {
     );
   }
   items.push(
+    { label: 'New Comment', icon: 'comment', shortcut: 'Mod-Alt-M', run: () => app.addComment() },
     { label: 'Paragraph…', icon: 'pilcrow', run: () => app.paragraphDialog() },
     { label: 'Clear Formatting', icon: 'eraser', run: () => c().clearFormatting().run() },
   );

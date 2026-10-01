@@ -8,6 +8,8 @@ import { h, toast, debounce, isPopoverOpen, closePopover } from './dom.js';
 import { icon } from './icons.js';
 import { Ribbon } from './ribbon.js';
 import { FindPanel, NavPane, Ruler } from './panels.js';
+import { CommentsPane, initialsOf } from './comments-pane.js';
+import { newId } from '../storage/db.js';
 import { openDialog, promptDialog } from './dialog.js';
 import { openBackstage } from './backstage.js';
 import { pickFile } from './start.js';
@@ -64,6 +66,7 @@ export class EditorScreen {
       ruler: saved.ruler !== false,
       // The navigation pane covers the page on narrow screens; start closed there.
       nav: Boolean(saved.nav) && window.innerWidth > 900,
+      comments: saved.comments !== false && window.innerWidth > 1100,
       marks: Boolean(saved.marks),
       spellcheck: saved.spellcheck !== false,
       zoom: Math.min(5, Math.max(0.1, Number(saved.zoom) || 1)),
@@ -83,6 +86,7 @@ export class EditorScreen {
     this.title = doc.title;
     this.settings = doc.settings;
     this.createdAt = doc.createdAt;
+    this.comments = doc.comments || {};
     this.buildChrome();
     this.applyView();
 
@@ -122,12 +126,14 @@ export class EditorScreen {
     this.editor.view.focus();
     this.editorEl.setAttribute('spellcheck', String(this.view.spellcheck));
     this.find.attach(this.editor);
+    this.editor.on('requestComment', () => this.addComment());
     this.applyGeometry();
     this.ruler.render();
     this.updateTitle();
     this.ribbon.update();
     this.updateStats();
     this.nav.render();
+    this.commentsPane.render();
     this.setZoom(this.view.zoom, { keepScroll: false });
     // On phones, fit the page to the screen instead of scrolling sideways.
     if (this.view.layout === 'print' && this.canvas.clientWidth < this.geometry.width * this.view.zoom + 48) {
@@ -187,6 +193,7 @@ export class EditorScreen {
     this.cleanups.forEach((fn) => fn());
     this.editor?.destroy();
     this.printStyle?.remove();
+    this.commentsPane?.destroy();
   }
 
   // ------------------------------------------------------------------ DOM
@@ -244,6 +251,7 @@ export class EditorScreen {
     this.find = new FindPanel(this);
     this.nav = new NavPane(this);
     this.ruler = new Ruler(this);
+    this.commentsPane = new CommentsPane(this);
 
     this.sheets = h('div', { class: 'page-sheets', 'aria-hidden': 'true' });
     this.pageStack = h('div', { class: 'page-stack' }, this.sheets);
@@ -297,7 +305,7 @@ export class EditorScreen {
       { class: 'editor-screen' },
       titlebar,
       this.ribbon.el,
-      h('div', { class: 'workspace' }, this.nav.el, this.canvas, this.find.el),
+      h('div', { class: 'workspace' }, this.nav.el, this.canvas, this.commentsPane.el, this.find.el),
       statusbar,
       focusExit,
     );
@@ -401,11 +409,13 @@ export class EditorScreen {
     this.queueSave();
     this.statsDebounced();
     this.nav.refresh();
+    this.commentsPane.refresh();
   }
 
   onSelectionChange() {
     this.updatePageStatus();
     this.selectionStatsDebounced();
+    this.commentsPane.syncSelection();
     if (this.nav.visible && !this.nav.input.value) this.nav.refresh();
   }
 
@@ -475,7 +485,7 @@ export class EditorScreen {
     const { state } = this.editor;
     const preview = state.doc.textBetween(0, Math.min(state.doc.content.size, 1200), ' ', ' ').replace(/\s+/g, ' ').trim().slice(0, 280);
     if (this.words == null) this.updateStats();
-    this.saving = saveDoc(this.docId, { json: this.editor.getJSON(), preview, words: this.words, title: this.title, settings: this.settings })
+    this.saving = saveDoc(this.docId, { json: this.editor.getJSON(), preview, words: this.words, title: this.title, settings: this.settings, comments: this.comments })
       .then(() => {
         this.setSaveState('saved');
         channel?.postMessage({ type: 'saved', id: this.docId, tab: TAB_ID });
@@ -527,6 +537,7 @@ export class EditorScreen {
     this.canvas.classList.toggle('no-ruler', !this.view.ruler || this.view.layout === 'web');
     this.screen.classList.toggle('show-marks', this.view.marks);
     this.nav.el.hidden = !this.view.nav;
+    this.commentsPane.el.hidden = !this.view.comments || !this.hasComments();
     this.layoutBtns.print.classList.toggle('is-active', this.view.layout === 'print');
     this.layoutBtns.web.classList.toggle('is-active', this.view.layout === 'web');
     try {
@@ -661,7 +672,7 @@ export class EditorScreen {
     try {
       await this.flush();
       if (format === 'pdf') toast('Choose “Save as PDF” as the printer to create a PDF.', { timeout: 4500 });
-      await exportDocument(this.editor, format, { title: this.title, settings: this.settings });
+      await exportDocument(this.editor, format, { title: this.title, settings: this.settings, comments: this.comments });
     } catch (err) {
       console.error(err);
       toast(`Export failed: ${err.message || err}`, { type: 'error', timeout: 6000 });
@@ -852,6 +863,101 @@ export class EditorScreen {
     speechSynthesis.speak(u);
     this.ribbon.update();
     return true;
+  }
+
+  // ------------------------------------------------------------------ comments
+  hasComments() {
+    if (!this.editor) return Object.keys(this.comments).length > 0;
+    let found = false;
+    this.editor.state.doc.descendants((n) => {
+      if (found) return false;
+      if (n.isText && n.marks.some((m) => m.type.name === 'comment')) found = true;
+      return !found;
+    });
+    return found;
+  }
+
+  get authorName() {
+    try {
+      return localStorage.getItem('lw:author') || '';
+    } catch {
+      return '';
+    }
+  }
+
+  async ensureAuthor() {
+    if (this.authorName) return this.authorName;
+    const r = await promptDialog({
+      title: 'Your name',
+      fields: [{ name: 'name', label: 'Name', value: '', placeholder: 'Shown on your comments', hint: 'Stored only in this browser.' }],
+      confirmLabel: 'Continue',
+    });
+    const name = r?.name?.trim() || 'Author';
+    try {
+      localStorage.setItem('lw:author', name);
+    } catch { /* ignore */ }
+    return name;
+  }
+
+  async addComment() {
+    const ed = this.editor;
+    const author = await this.ensureAuthor();
+    const id = `c${newId().replace(/-/g, '').slice(0, 12)}`;
+    if (!ed.chain().focus().setComment(id).run()) {
+      toast('Select some text to comment on.');
+      return;
+    }
+    this.comments = { ...this.comments, [id]: { id, author, initials: initialsOf(author), date: Date.now(), text: '', replies: [], resolved: false } };
+    this.view.comments = true;
+    this.applyView();
+    this.commentsPane.el.hidden = false;
+    this.commentsPane.render({ focusId: id });
+    this.ribbon.update();
+  }
+
+  commentsChanged() {
+    this.commentsPane.render();
+    this.applyView();
+    this.ribbon.update();
+    this.saveNow();
+  }
+
+  updateComment(id, patch) {
+    if (!this.comments[id]) return;
+    this.comments = { ...this.comments, [id]: { ...this.comments[id], ...patch } };
+    this.commentsChanged();
+  }
+
+  resolveComment(id, resolved = true) {
+    this.updateComment(id, { resolved });
+  }
+
+  async replyToComment(id, text) {
+    const author = await this.ensureAuthor();
+    const c = this.comments[id];
+    if (!c) return;
+    this.updateComment(id, { replies: [...(c.replies || []), { author, initials: initialsOf(author), date: Date.now(), text }] });
+  }
+
+  deleteComment(id) {
+    this.editor.commands.unsetComment(id);
+    const { [id]: _removed, ...rest } = this.comments;
+    this.comments = rest;
+    this.commentsChanged();
+  }
+
+  deleteCurrentComment() {
+    const [id] = [...this.commentsPane.active];
+    if (id) this.deleteComment(id);
+    else toast('Place the cursor inside a comment to delete it.');
+  }
+
+  toggleComments(force) {
+    this.view.comments = force ?? !this.view.comments;
+    this.applyView();
+    if (this.view.comments && !this.hasComments()) toast('This document has no comments yet.');
+    this.commentsPane.render();
+    this.ribbon.update();
   }
 
   togglePageNumbers() {

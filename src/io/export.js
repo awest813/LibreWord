@@ -50,12 +50,12 @@ ${staticHtml(editor)}
 </html>`;
 }
 
-export async function exportDocument(editor, format, { title, settings }) {
+export async function exportDocument(editor, format, { title, settings, comments = {} }) {
   const name = safeFileName(title || 'Untitled document');
   switch (format) {
     case 'docx': {
       const { docxBlob } = await import('./docx.js');
-      const blob = await docxBlob(editor.getJSON(), settings, { title });
+      const blob = await docxBlob(editor.getJSON(), settings, { title, comments });
       downloadBlob(blob, `${name}.docx`);
       return;
     }

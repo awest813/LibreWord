@@ -17,6 +17,7 @@ import { Pagination } from './pagination.js';
 import { Search } from './search.js';
 import { TableOfContents } from './toc.js';
 import { WordCommands } from './word-commands.js';
+import { CommentMark } from './comments.js';
 
 /**
  * The extension list is shared by the live editor and by tests, so the
@@ -52,6 +53,7 @@ export function buildExtensions({ getGeometry = () => null, onLayout = () => {},
     PageBreak,
     TableOfContents.configure({ getPageOf }),
     WordCommands,
+    CommentMark,
     Search,
     Pagination.configure({ getGeometry, onLayout }),
   ];

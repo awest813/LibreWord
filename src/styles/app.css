@@ -405,6 +405,32 @@ button { cursor: pointer; }
 
 .lw-document.painter-active, .lw-document.painter-active * { cursor: copy !important; }
 
+/* ------------------------------------------------------------------ comments */
+.lw-document .lw-comment { background: rgba(255, 213, 79, 0.32); border-bottom: 2px solid #f2b705; }
+.comments-pane { width: 300px; flex: 0 0 auto; background: var(--surface-2); border-left: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+.comments-pane > header { display: flex; align-items: center; justify-content: space-between; padding: 10px 8px 6px 14px; font-weight: 600; }
+.comments-list { flex: 1; overflow: auto; padding: 4px 10px 16px; display: flex; flex-direction: column; gap: 8px; }
+.comment-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; cursor: pointer; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05); }
+.comment-card.is-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.comment-card.is-resolved { opacity: 0.7; }
+.comment-card header { display: flex; align-items: center; gap: 8px; }
+.comment-card .avatar { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 11.5px; font-weight: 600; flex: 0 0 auto; }
+.comment-card .who { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.comment-card .who strong { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.comment-card .who small { font-size: 11.5px; color: var(--text-muted); }
+.comment-actions { display: flex; gap: 0; }
+.comment-actions .icon-btn { width: 26px; height: 26px; }
+.comment-actions .icon { width: 15px; height: 15px; }
+.comment-quote { margin: 8px 0 6px; padding: 0 0 0 8px; border-left: 3px solid #f2b705; color: var(--text-muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.comment-text { margin: 4px 0 0; font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+.comment-card textarea { width: 100%; margin-top: 6px; border: 1px solid var(--border-strong); border-radius: 4px; padding: 6px 8px; resize: vertical; background: var(--surface); font-size: 13.5px; }
+.comment-card textarea:focus, .comment-reply-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.comment-buttons { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+.comment-buttons .btn { height: 28px; padding: 0 12px; font-size: 13px; }
+.comment-reply { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.comment-reply .avatar { width: 22px; height: 22px; font-size: 10px; }
+.comment-reply-input { width: 100%; margin-top: 8px; height: 30px; border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 8px; background: var(--surface); font-size: 13px; }
+
 /* ------------------------------------------------------------------ find panel */
 .find-panel {
   position: absolute; top: 8px; right: 24px; z-index: 8; width: 400px; max-width: calc(100% - 32px);
@@ -544,6 +570,7 @@ kbd { font: 12px var(--font-ui); background: var(--surface-2); border: 1px solid
 @media (max-width: 900px) {
   .titlebar-search { display: none; }
   .nav-pane { position: absolute; z-index: 6; top: 0; bottom: 0; left: 0; box-shadow: var(--shadow-popover); }
+  .comments-pane { position: absolute; z-index: 6; top: 0; bottom: 0; right: 0; box-shadow: var(--shadow-popover); }
   .backstage-nav { width: 64px; }
   .backstage-nav button span { display: none; }
   .backstage-main { padding: 20px; }
@@ -569,6 +596,8 @@ kbd { font: 12px var(--font-ui); background: var(--surface-2); border: 1px solid
   .lw-document .page-break { break-after: page; }
   .lw-document .page-break::after { display: none; }
   .lw-document .search-match { background: none; }
+  .comments-pane { display: none !important; }
+  .lw-document .lw-comment { background: none !important; border: 0 !important; }
   .lw-document .ProseMirror-selectednode { outline: none; }
   .lw-document [data-resize-handle] { display: none; }
   .lw-document tr, .lw-document img { break-inside: avoid; }

@@ -578,6 +578,16 @@ export class Ribbon {
         B({ icon: 'wordCount', label: 'Word Count', large: true, shortcut: 'Mod-Shift-G', run: () => a.wordCountDialog() }),
       ),
       G(
+        'Comments',
+        B({ icon: 'comment', label: 'New Comment', large: true, shortcut: 'Mod-Alt-M', run: () => a.addComment(), id: 'new-comment' }),
+        C(
+          B({ icon: 'trash', label: 'Delete', showLabel: true, run: () => a.deleteCurrentComment() }),
+          B({ icon: 'chevronUp', label: 'Previous', showLabel: true, run: () => a.commentsPane.step(-1) }),
+          B({ icon: 'chevronDown', label: 'Next', showLabel: true, run: () => a.commentsPane.step(1) }),
+        ),
+        B({ icon: 'comments', label: 'Show Comments', large: true, run: () => a.toggleComments(), active: () => a.view.comments && !a.commentsPane.el.hidden }),
+      ),
+      G(
         'Speech',
         B({ icon: 'readAloud', label: 'Read Aloud', large: true, run: () => a.readAloud(), active: () => a.speaking, enabled: () => 'speechSynthesis' in window }),
       ),

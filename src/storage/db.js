@@ -98,11 +98,12 @@ export async function getDoc(id) {
     json: content?.json ?? null,
     html: content?.html ?? '',
     settings: { ...DEFAULT_SETTINGS, ...(content?.settings || {}), margins: { ...DEFAULT_SETTINGS.margins, ...(content?.settings?.margins || {}) } },
+    comments: content?.comments || {},
   };
 }
 
 /** Create a document from HTML (templates, imports) or editor JSON. */
-export async function createDoc({ title = 'Untitled document', html = '', json = null, settings = {} } = {}) {
+export async function createDoc({ title = 'Untitled document', html = '', json = null, settings = {}, comments = {} } = {}) {
   const db = await getDb();
   const id = newId();
   const now = Date.now();
@@ -117,17 +118,17 @@ export async function createDoc({ title = 'Untitled document', html = '', json =
       preview: text.slice(0, 280),
       words: text ? text.split(/\s+/).length : 0,
     }),
-    tx.objectStore('content').put({ id, json, html, settings: { ...DEFAULT_SETTINGS, ...settings } }),
+    tx.objectStore('content').put({ id, json, html, settings: { ...DEFAULT_SETTINGS, ...settings }, comments }),
   ]);
   await tx.done;
   return id;
 }
 
 /**
- * Persist a document. Any of `title`, `json`, `settings`, `preview`, `words`
+ * Persist a document. Any of `title`, `json`, `settings`, `comments`, `preview`, `words`
  * may be omitted to leave the stored value untouched.
  */
-export async function saveDoc(id, { title, json, settings, preview, words } = {}) {
+export async function saveDoc(id, { title, json, settings, comments, preview, words } = {}) {
   const db = await getDb();
   const tx = db.transaction(['meta', 'content'], 'readwrite');
   const metaStore = tx.objectStore('meta');
@@ -148,6 +149,7 @@ export async function saveDoc(id, { title, json, settings, preview, words } = {}
     nextContent.html = '';
   }
   if (settings !== undefined) nextContent.settings = settings;
+  if (comments !== undefined) nextContent.comments = comments;
 
   await Promise.all([metaStore.put(meta), contentStore.put(nextContent)]);
   await tx.done;
@@ -173,6 +175,7 @@ export async function duplicateDoc(id) {
     html: doc.html,
     json: doc.json,
     settings: doc.settings,
+    comments: doc.comments,
   });
   await saveDoc(newDocId, { preview: doc.preview, words: doc.words });
   return newDocId;

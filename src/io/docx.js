@@ -1,7 +1,7 @@
 import {
   AlignmentType, BorderStyle, Document, ExternalHyperlink, Footer, Header, HeadingLevel, ImageRun, LevelFormat,
   PageBreak, PageNumber, PageOrientation, Paragraph, ShadingType, Tab, Table, TableCell, TableOfContents, TableRow,
-  TextRun, WidthType, Packer, UnderlineType,
+  TextRun, WidthType, Packer, UnderlineType, CommentRangeStart, CommentRangeEnd, CommentReference,
 } from 'docx';
 import { pageGeometry, TWIPS_PER_PX } from '../editor/page-setup.js';
 
@@ -109,11 +109,40 @@ async function collectImages(doc) {
   return images;
 }
 
+/**
+ * Comment anchors: for every comment id, the index (in conversion order) of
+ * the first and last text node it covers. Code blocks are skipped because
+ * their text is emitted directly, not through runs().
+ */
+function scanComments(doc) {
+  const spans = new Map();
+  let index = 0;
+  const walk = (n) => {
+    if (n.type === 'codeBlock') return;
+    if (n.type === 'text') {
+      for (const m of n.marks || []) {
+        if (m.type !== 'comment' || !m.attrs?.id) continue;
+        const s = spans.get(m.attrs.id);
+        if (s) s.last = index;
+        else spans.set(m.attrs.id, { first: index, last: index });
+      }
+      index++;
+      return;
+    }
+    (n.content || []).forEach(walk);
+  };
+  walk(doc);
+  return spans;
+}
+
 class Converter {
-  constructor(images, geometry) {
+  constructor(images, geometry, commentAnchors = new Map()) {
     this.images = images;
     this.geometry = geometry;
     this.listInstance = 0;
+    this.textIndex = 0;
+    // comment id → { first, last, ids: [numeric docx ids for the thread] }
+    this.commentAnchors = commentAnchors;
   }
 
   runs(nodes = [], base = {}) {
@@ -140,6 +169,11 @@ class Converter {
         continue;
       }
       if (n.type !== 'text') continue;
+      const textIndex = this.textIndex++;
+      const anchors = (n.marks || [])
+        .filter((m) => m.type === 'comment' && this.commentAnchors.has(m.attrs?.id))
+        .map((m) => this.commentAnchors.get(m.attrs.id));
+      for (const a of anchors) if (a.first === textIndex) a.ids.forEach((id) => out.push(new CommentRangeStart(id)));
       const opts = { ...base };
       let link = null;
       for (const m of n.marks || []) {
@@ -180,6 +214,13 @@ class Converter {
         out.push(new ExternalHyperlink({ link, children: [new TextRun({ ...opts, children })] }));
       } else {
         out.push(new TextRun({ ...opts, children }));
+      }
+      for (const a of anchors) {
+        if (a.last !== textIndex) continue;
+        a.ids.forEach((id) => {
+          out.push(new CommentRangeEnd(id));
+          out.push(new TextRun({ children: [new CommentReference(id)] }));
+        });
       }
     }
     return out;
@@ -325,10 +366,33 @@ function headerFooter(text, pageNumbers, isFooter) {
   return isFooter ? new Footer({ children: [p] }) : new Header({ children: [p] });
 }
 
-export async function buildDocx(json, settings, { title = 'Document', author = 'LibreWord' } = {}) {
+function buildComments(json, comments = {}) {
+  const spans = scanComments(json);
+  const anchors = new Map();
+  const children = [];
+  let next = 0;
+  const para = (text) => String(text || '').split('\n').map((line) => new Paragraph({ children: [new TextRun(line)] }));
+  for (const [id, span] of spans) {
+    const c = comments[id];
+    if (!c) continue;
+    const mainId = next++;
+    const ids = [mainId];
+    children.push({ id: mainId, author: c.author || 'Author', initials: c.initials || '', date: new Date(c.date || Date.now()), resolved: Boolean(c.resolved), children: para(c.text) });
+    for (const r of c.replies || []) {
+      const rid = next++;
+      ids.push(rid);
+      children.push({ id: rid, parentId: mainId, author: r.author || 'Author', initials: r.initials || '', date: new Date(r.date || Date.now()), children: para(r.text) });
+    }
+    anchors.set(id, { ...span, ids });
+  }
+  return { anchors, options: children.length ? { children } : undefined };
+}
+
+export async function buildDocx(json, settings, { title = 'Document', author = 'LibreWord', comments = {} } = {}) {
   const geometry = pageGeometry(settings);
   const images = await collectImages(json);
-  const conv = new Converter(images, geometry);
+  const commentData = buildComments(json, comments);
+  const conv = new Converter(images, geometry, commentData.anchors);
   const children = conv.blocks(json.content || []);
   const hasToc = JSON.stringify(json).includes('"tableOfContents"');
   const landscape = settings.orientation === 'landscape';
@@ -344,6 +408,7 @@ export async function buildDocx(json, settings, { title = 'Document', author = '
     creator: author,
     title,
     features: hasToc ? { updateFields: true } : undefined,
+    comments: commentData.options,
     styles: {
       default: {
         document: { run: { font: 'Calibri', size: 22 }, paragraph: { spacing: { after: 160, line: 276 } } },
