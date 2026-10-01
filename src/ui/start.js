@@ -1,6 +1,6 @@
-import { h, formatDate, toast, debounce, showPopover, menu } from './dom.js';
+import { h, formatDate, toast, debounce, showPopover, menu, downloadBlob } from './dom.js';
 import { icon } from './icons.js';
-import { listDocs, deleteDoc, duplicateDoc, renameDoc } from '../storage/db.js';
+import { listDocs, deleteDoc, duplicateDoc, renameDoc, exportBackup, importBackup } from '../storage/db.js';
 import { TEMPLATES } from '../templates.js';
 import { sanitizeHtml, IMPORT_ACCEPT } from '../io/import.js';
 import { confirmDialog, promptDialog } from './dialog.js';
@@ -51,11 +51,16 @@ export function pickFile(accept = IMPORT_ACCEPT) {
 export function documentList({ onOpen, compact = false }) {
   const wrap = h('div', {});
   const filter = h('input', { type: 'search', placeholder: 'Search documents', 'aria-label': 'Search documents' });
+  const more = h('button', { type: 'button', class: 'icon-btn', title: 'Backup & restore', 'aria-label': 'Backup and restore', html: icon('more') });
+  more.addEventListener('click', () => showPopover(more, menu([
+    { label: 'Back Up All Documents', icon: 'download', run: backup },
+    { label: 'Restore From Backup…', icon: 'upload', run: restore },
+  ], { iconFn: (n) => icon(n) }), { placement: 'bottom-end' }));
   const header = h(
     'div',
     { class: 'start-section-title' },
     h('h2', {}, 'Recent'),
-    h('div', { class: 'doc-toolbar' }, h('label', { class: 'doc-filter', html: icon('search') }, filter)),
+    h('div', { class: 'doc-toolbar' }, h('label', { class: 'doc-filter', html: icon('search') }, filter), compact ? null : more),
   );
   const body = h('div', {});
   wrap.append(header, body);
@@ -140,6 +145,25 @@ export function documentList({ onOpen, compact = false }) {
     toast(`Deleted “${d.title}”`);
     refresh();
   };
+
+  async function backup() {
+    const data = await exportBackup();
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadBlob(new Blob([JSON.stringify(data)], { type: 'application/json' }), `libreword-backup-${stamp}.json`);
+    toast(`Backed up ${data.documents.length} document${data.documents.length === 1 ? '' : 's'}.`, { type: 'success' });
+  }
+
+  async function restore() {
+    const file = await pickFile('.json,application/json');
+    if (!file) return;
+    try {
+      const r = await importBackup(JSON.parse(await file.text()));
+      toast(`Restored ${r.added} new and ${r.updated} updated document${r.added + r.updated === 1 ? '' : 's'}${r.skipped ? ` (${r.skipped} already up to date)` : ''}.`, { type: 'success', timeout: 5000 });
+      refresh();
+    } catch (err) {
+      toast(err instanceof SyntaxError ? 'That file is not valid JSON.' : err.message, { type: 'error', timeout: 6000 });
+    }
+  }
 
   filter.addEventListener('input', debounce(render, 80));
   refresh();

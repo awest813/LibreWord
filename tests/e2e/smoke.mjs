@@ -420,6 +420,24 @@ await test('documents from LibreWord v1 are migrated', async () => {
   await ctx2.close();
 });
 
+await test('back up all documents and restore them into a fresh profile', async () => {
+  await page.click('.app-logo');
+  await page.waitForSelector('.doc-row');
+  const titles = await page.$$eval('.doc-row strong', (els) => els.map((e) => e.textContent).sort());
+  await page.click('button[aria-label="Backup and restore"]');
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('.menu-item:has-text("Back Up")')]);
+  const backup = await readFile(await download.path());
+  const ctx3 = await browser.newContext();
+  const p3 = await ctx3.newPage();
+  await p3.goto(BASE);
+  await p3.click('button[aria-label="Backup and restore"]');
+  const [chooser] = await Promise.all([p3.waitForEvent('filechooser'), p3.click('.menu-item:has-text("Restore")')]);
+  await chooser.setFiles({ name: 'backup.json', mimeType: 'application/json', buffer: backup });
+  await p3.waitForFunction((n) => document.querySelectorAll('.doc-row').length === n, titles.length);
+  assert.deepEqual(await p3.$$eval('.doc-row strong', (els) => els.map((e) => e.textContent).sort()), titles);
+  await ctx3.close();
+});
+
 await test('no runtime errors', async () => {
   assert.deepEqual(errors, []);
 });

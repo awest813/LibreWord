@@ -179,6 +179,58 @@ export async function deleteDoc(id) {
 }
 
 // ---------------------------------------------------------------------------
+// Backup & restore
+// ---------------------------------------------------------------------------
+
+export const BACKUP_FORMAT = 'libreword-backup';
+
+/** Every document (metadata + content) as one JSON-serialisable object. */
+export async function exportBackup() {
+  const db = await getDb();
+  const tx = db.transaction(['meta', 'content'], 'readonly');
+  const [metas, contents] = await Promise.all([tx.objectStore('meta').getAll(), tx.objectStore('content').getAll()]);
+  const byId = new Map(contents.map((c) => [c.id, c]));
+  return {
+    format: BACKUP_FORMAT,
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    documents: metas.map((m) => ({ meta: m, content: byId.get(m.id) || { id: m.id, json: null, html: '' } })),
+  };
+}
+
+/**
+ * Restore documents from a backup. Documents whose id already exists are
+ * kept unless the backup copy is newer. Returns { added, updated, skipped }.
+ */
+export async function importBackup(data) {
+  if (!data || data.format !== BACKUP_FORMAT || !Array.isArray(data.documents)) {
+    throw new Error('This file is not a LibreWord backup.');
+  }
+  const db = await getDb();
+  const tx = db.transaction(['meta', 'content'], 'readwrite');
+  const meta = tx.objectStore('meta');
+  const content = tx.objectStore('content');
+  const result = { added: 0, updated: 0, skipped: 0 };
+  for (const doc of data.documents) {
+    const m = doc?.meta;
+    if (!m?.id || typeof m.title !== 'string') {
+      result.skipped++;
+      continue;
+    }
+    const existing = await meta.get(m.id);
+    if (existing && existing.updatedAt >= m.updatedAt) {
+      result.skipped++;
+      continue;
+    }
+    await meta.put({ ...m });
+    await content.put({ id: m.id, json: doc.content?.json ?? null, html: doc.content?.html ?? '', settings: doc.content?.settings, comments: doc.content?.comments || {} });
+    result[existing ? 'updated' : 'added']++;
+  }
+  await tx.done;
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Version history
 // ---------------------------------------------------------------------------
 
