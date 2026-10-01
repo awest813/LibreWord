@@ -1,0 +1,118 @@
+/*
+ * Document content styles — shared by the editor and by HTML export.
+ * Pagination relies on top-level blocks having no top margin (spacing above
+ * a block is expressed as padding), so sibling margins never collapse.
+ */
+.lw-document {
+  --doc-font: Calibri, Carlito, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --doc-heading-font: 'Calibri Light', Carlito, 'Segoe UI Light', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --doc-text: #000;
+  --doc-accent: #2f5496;
+  --doc-accent-dark: #1f3763;
+  font-family: var(--doc-font);
+  font-size: 11pt;
+  line-height: 1.15;
+  color: var(--doc-text);
+  tab-size: 48px;
+  -moz-tab-size: 48px;
+  overflow-wrap: break-word;
+  font-variant-ligatures: common-ligatures;
+  font-kerning: normal;
+}
+
+.lw-document p,
+.lw-document h1, .lw-document h2, .lw-document h3,
+.lw-document h4, .lw-document h5, .lw-document h6,
+.lw-document ul, .lw-document ol, .lw-document blockquote,
+.lw-document pre, .lw-document table, .lw-document hr,
+.lw-document .tableWrapper, .lw-document nav.toc {
+  margin-top: 0;
+}
+
+.lw-document p { margin: 0 0 8pt; min-height: 1em; }
+.lw-document li > p { margin-bottom: 0; }
+.lw-document li { margin-bottom: 2pt; }
+
+.lw-document h1, .lw-document h2, .lw-document h3,
+.lw-document h4, .lw-document h5, .lw-document h6 {
+  font-family: var(--doc-heading-font);
+  font-weight: 400;
+  color: var(--doc-accent);
+  line-height: 1.08;
+  margin-bottom: 0;
+  break-after: avoid;
+}
+.lw-document h1 { font-size: 16pt; padding-top: 12pt; margin-bottom: 4pt; }
+.lw-document h2 { font-size: 13pt; padding-top: 2pt; margin-bottom: 4pt; }
+.lw-document h3 { font-size: 12pt; padding-top: 2pt; margin-bottom: 2pt; color: var(--doc-accent-dark); }
+.lw-document h4 { font-size: 11pt; padding-top: 2pt; font-style: italic; font-family: var(--doc-font); }
+.lw-document h5 { font-size: 11pt; padding-top: 2pt; font-family: var(--doc-font); }
+.lw-document h6 { font-size: 11pt; padding-top: 2pt; color: var(--doc-accent-dark); font-family: var(--doc-font); }
+.lw-document > :first-child { padding-top: 0; }
+
+/* Named paragraph styles */
+.lw-document p.pstyle-title { font-family: var(--doc-heading-font); font-size: 28pt; line-height: 1; letter-spacing: -0.5pt; margin-bottom: 4pt; }
+.lw-document p.pstyle-subtitle { font-size: 11pt; color: #5a5a5a; letter-spacing: 0.75pt; margin-bottom: 8pt; }
+.lw-document p.pstyle-quote { font-style: italic; color: #404040; text-align: center; padding: 10pt 0.6in 0; }
+.lw-document p.pstyle-intense-quote {
+  font-style: italic; color: var(--doc-accent); text-align: center;
+  border-top: 1px solid var(--doc-accent); border-bottom: 1px solid var(--doc-accent);
+  padding: 10pt 0.6in; margin: 0 0.6in 18pt;
+}
+.lw-document p.pstyle-caption { font-style: italic; font-size: 9pt; color: #44546a; margin-bottom: 10pt; }
+.lw-document p.pstyle-no-spacing { margin-bottom: 0; line-height: 1; }
+
+.lw-document strong, .lw-document b { font-weight: 700; }
+.lw-document a { color: #0563c1; text-decoration: underline; cursor: text; }
+.lw-document mark { background-color: #ffff00; color: inherit; padding: 0; }
+.lw-document code {
+  font-family: Consolas, 'Cascadia Mono', 'SFMono-Regular', Menlo, monospace;
+  font-size: 0.92em; background: #f2f2f2; border-radius: 3px; padding: 0.1em 0.25em;
+}
+.lw-document pre {
+  font-family: Consolas, 'Cascadia Mono', 'SFMono-Regular', Menlo, monospace;
+  font-size: 10pt; line-height: 1.4; background: #f5f5f5; border: 1px solid #e5e5e5;
+  border-radius: 4px; padding: 8pt 10pt; margin-bottom: 8pt; white-space: pre-wrap;
+}
+.lw-document pre code { background: none; padding: 0; font-size: inherit; }
+
+.lw-document blockquote { border-left: 3px solid #c8c8c8; margin: 0 0 8pt; padding: 0 0 0 12pt; color: #404040; }
+.lw-document hr { border: 0; border-top: 1px solid #a6a6a6; margin: 0 0 8pt; padding-top: 6pt; height: 0; background-clip: content-box; }
+
+.lw-document ul, .lw-document ol { padding-left: 0.5in; margin-bottom: 8pt; }
+.lw-document li > ul, .lw-document li > ol { margin-bottom: 0; padding-top: 2pt; }
+.lw-document ul { list-style-type: disc; }
+.lw-document ul ul { list-style-type: circle; }
+.lw-document ul ul ul { list-style-type: square; }
+.lw-document ol ol { list-style-type: lower-alpha; }
+.lw-document ol ol ol { list-style-type: lower-roman; }
+
+.lw-document ul[data-type='taskList'] { list-style: none; padding-left: 0.25in; }
+.lw-document ul[data-type='taskList'] li { display: flex; align-items: flex-start; gap: 0.5em; }
+.lw-document ul[data-type='taskList'] li > label { flex: 0 0 auto; user-select: none; margin-top: 0.15em; }
+.lw-document ul[data-type='taskList'] li > label input { width: 1em; height: 1em; margin: 0; accent-color: var(--doc-accent); cursor: pointer; }
+.lw-document ul[data-type='taskList'] li > div { flex: 1 1 auto; min-width: 0; }
+.lw-document ul[data-type='taskList'] li[data-checked='true'] > div { text-decoration: line-through; color: #7f7f7f; }
+
+.lw-document img { max-width: 100%; height: auto; vertical-align: bottom; }
+
+.lw-document table { border-collapse: collapse; table-layout: fixed; width: 100%; margin-bottom: 8pt; }
+.lw-document .tableWrapper { margin-bottom: 8pt; overflow-x: auto; }
+.lw-document .tableWrapper table { margin-bottom: 0; }
+.lw-document td, .lw-document th {
+  border: 1px solid #bfbfbf; padding: 3pt 6pt; vertical-align: top; position: relative; min-width: 1em;
+}
+.lw-document th { font-weight: 700; text-align: left; background: #f2f2f2; }
+.lw-document td > p, .lw-document th > p { margin-bottom: 0; }
+
+.lw-document nav.toc { margin-bottom: 12pt; }
+.lw-document .toc-title { font-family: var(--doc-heading-font); font-size: 16pt; color: var(--doc-accent); margin-bottom: 6pt; }
+.lw-document .toc-entry { display: flex; align-items: baseline; gap: 4px; color: inherit; text-decoration: none; padding: 1pt 0; }
+.lw-document .toc-entry .toc-text { flex: 0 1 auto; }
+.lw-document .toc-dots { flex: 1 1 auto; border-bottom: 1px dotted #7f7f7f; transform: translateY(-3px); min-width: 12px; }
+.lw-document .toc-page { flex: 0 0 auto; }
+.lw-document .toc-level-2 { padding-left: 0.25in; }
+.lw-document .toc-level-3 { padding-left: 0.5in; }
+.lw-document .toc-level-4 { padding-left: 0.75in; }
+.lw-document .toc-level-5, .lw-document .toc-level-6 { padding-left: 1in; }
+.lw-document .toc-empty { color: #7f7f7f; font-style: italic; }

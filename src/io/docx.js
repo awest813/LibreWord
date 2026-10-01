@@ -1,0 +1,418 @@
+import {
+  AlignmentType, BorderStyle, Document, ExternalHyperlink, Footer, Header, HeadingLevel, ImageRun, LevelFormat,
+  PageBreak, PageNumber, PageOrientation, Paragraph, ShadingType, Tab, Table, TableCell, TableOfContents, TableRow,
+  TextRun, WidthType, Packer, UnderlineType,
+} from 'docx';
+import { pageGeometry, TWIPS_PER_PX } from '../editor/page-setup.js';
+
+const HEADINGS = [null, HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3, HeadingLevel.HEADING_4, HeadingLevel.HEADING_5, HeadingLevel.HEADING_6];
+const ALIGN = { left: AlignmentType.LEFT, center: AlignmentType.CENTER, right: AlignmentType.RIGHT, justify: AlignmentType.JUSTIFIED };
+const STYLE_IDS = { title: 'Title', subtitle: 'Subtitle', quote: 'Quote', 'intense-quote': 'IntenseQuote', caption: 'Caption', 'no-spacing': 'NoSpacing' };
+
+const NAMED_COLORS = {
+  black: '000000', white: 'FFFFFF', red: 'FF0000', green: '008000', blue: '0000FF', yellow: 'FFFF00', orange: 'FFA500',
+  purple: '800080', gray: '808080', grey: '808080', pink: 'FFC0CB', cyan: '00FFFF', magenta: 'FF00FF', lime: '00FF00',
+  navy: '000080', teal: '008080', maroon: '800000', olive: '808000', silver: 'C0C0C0', brown: 'A52A2A',
+};
+
+export function cssColorToHex(value) {
+  if (!value) return undefined;
+  const v = String(value).trim().toLowerCase();
+  if (NAMED_COLORS[v]) return NAMED_COLORS[v];
+  let m = /^#([0-9a-f]{3})$/.exec(v);
+  if (m) return m[1].split('').map((c) => c + c).join('').toUpperCase();
+  m = /^#([0-9a-f]{6})([0-9a-f]{2})?$/.exec(v);
+  if (m) return m[1].toUpperCase();
+  m = /^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/.exec(v);
+  if (m) return [m[1], m[2], m[3]].map((n) => Math.min(255, +n).toString(16).padStart(2, '0')).join('').toUpperCase();
+  return undefined;
+}
+
+export function fontSizeToHalfPoints(value) {
+  if (!value) return undefined;
+  const n = parseFloat(value);
+  if (Number.isNaN(n)) return undefined;
+  const pt = /px$/.test(value) ? n * 0.75 : n;
+  return Math.round(pt * 2);
+}
+
+const firstFont = (stack) => (stack ? stack.split(',')[0].trim().replace(/^['"]|['"]$/g, '') : undefined);
+const ptToTwips = (pt) => Math.round(pt * 20);
+
+function dataUrlToBytes(src) {
+  const m = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(src);
+  if (!m) return null;
+  const bin = m[2] ? atob(m[3]) : decodeURIComponent(m[3]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return { bytes, mime: m[1] };
+}
+
+const IMAGE_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/gif': 'gif', 'image/bmp': 'bmp' };
+
+/** Re-encode anything docx can't embed directly (webp, svg…) as PNG via canvas. */
+async function toEmbeddable(bytes, mime) {
+  if (IMAGE_TYPES[mime]) return { bytes, type: IMAGE_TYPES[mime] };
+  if (typeof document === 'undefined' || typeof createImageBitmap === 'undefined') return null;
+  const bmp = await createImageBitmap(new Blob([bytes], { type: mime }));
+  const canvas = document.createElement('canvas');
+  canvas.width = bmp.width;
+  canvas.height = bmp.height;
+  canvas.getContext('2d').drawImage(bmp, 0, 0);
+  const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), type: 'png' };
+}
+
+async function imageSize(bytes, mime) {
+  try {
+    if (typeof createImageBitmap !== 'undefined') {
+      const bmp = await createImageBitmap(new Blob([bytes], { type: mime }));
+      return { width: bmp.width, height: bmp.height };
+    }
+  } catch { /* fall through */ }
+  // PNG header fallback (used in tests / non-DOM environments)
+  if (bytes[0] === 0x89 && bytes[1] === 0x50) {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset);
+    return { width: dv.getUint32(16), height: dv.getUint32(20) };
+  }
+  return { width: 300, height: 200 };
+}
+
+/** Pre-load every image in the document so the synchronous conversion can embed them. */
+async function collectImages(doc) {
+  const images = new Map();
+  const srcs = new Set();
+  const walk = (n) => {
+    if (n.type === 'image' && n.attrs?.src) srcs.add(n.attrs.src);
+    (n.content || []).forEach(walk);
+  };
+  walk(doc);
+  await Promise.all(
+    [...srcs].map(async (src) => {
+      try {
+        let data = dataUrlToBytes(src);
+        if (!data) {
+          const res = await fetch(src);
+          if (!res.ok) return;
+          const blob = await res.blob();
+          data = { bytes: new Uint8Array(await blob.arrayBuffer()), mime: blob.type };
+        }
+        const embeddable = await toEmbeddable(data.bytes, data.mime);
+        if (!embeddable) return;
+        const size = await imageSize(data.bytes, data.mime);
+        images.set(src, { ...embeddable, ...size });
+      } catch {
+        /* unreachable image — skipped */
+      }
+    }),
+  );
+  return images;
+}
+
+class Converter {
+  constructor(images, geometry) {
+    this.images = images;
+    this.geometry = geometry;
+    this.listInstance = 0;
+  }
+
+  runs(nodes = [], base = {}) {
+    const out = [];
+    for (const n of nodes) {
+      if (n.type === 'hardBreak') {
+        out.push(new TextRun({ break: 1 }));
+        continue;
+      }
+      if (n.type === 'image') {
+        const img = this.images.get(n.attrs?.src);
+        if (!img) {
+          if (n.attrs?.alt) out.push(new TextRun({ text: `[${n.attrs.alt}]`, italics: true }));
+          continue;
+        }
+        let width = Number(n.attrs?.width) || img.width;
+        let height = Number(n.attrs?.height) || Math.round((width / img.width) * img.height);
+        const maxW = this.geometry.contentWidth;
+        if (width > maxW) {
+          height = Math.round((height * maxW) / width);
+          width = maxW;
+        }
+        out.push(new ImageRun({ type: img.type, data: img.bytes, transformation: { width, height }, altText: n.attrs?.alt ? { name: n.attrs.alt, description: n.attrs.alt, title: n.attrs.alt } : undefined }));
+        continue;
+      }
+      if (n.type !== 'text') continue;
+      const opts = { ...base };
+      let link = null;
+      for (const m of n.marks || []) {
+        switch (m.type) {
+          case 'bold': opts.bold = true; break;
+          case 'italic': opts.italics = true; break;
+          case 'underline': opts.underline = { type: UnderlineType.SINGLE }; break;
+          case 'strike': opts.strike = true; break;
+          case 'subscript': opts.subScript = true; break;
+          case 'superscript': opts.superScript = true; break;
+          case 'code': opts.font = 'Consolas'; opts.shading = { type: ShadingType.CLEAR, fill: 'F2F2F2', color: 'auto' }; break;
+          case 'highlight': {
+            const fill = cssColorToHex(m.attrs?.color) || 'FFFF00';
+            opts.shading = { type: ShadingType.CLEAR, fill, color: 'auto' };
+            break;
+          }
+          case 'textStyle': {
+            const color = cssColorToHex(m.attrs?.color);
+            if (color) opts.color = color;
+            const size = fontSizeToHalfPoints(m.attrs?.fontSize);
+            if (size) opts.size = size;
+            const font = firstFont(m.attrs?.fontFamily);
+            if (font) opts.font = font;
+            break;
+          }
+          case 'link': link = m.attrs?.href; break;
+          default: break;
+        }
+      }
+      const parts = n.text.split('\t');
+      const children = [];
+      parts.forEach((p, i) => {
+        if (i > 0) children.push(new Tab());
+        if (p) children.push(p);
+      });
+      if (link) {
+        opts.style = 'Hyperlink';
+        out.push(new ExternalHyperlink({ link, children: [new TextRun({ ...opts, children })] }));
+      } else {
+        out.push(new TextRun({ ...opts, children }));
+      }
+    }
+    return out;
+  }
+
+  paragraphOptions(attrs = {}) {
+    const o = {};
+    if (attrs.textAlign && ALIGN[attrs.textAlign]) o.alignment = ALIGN[attrs.textAlign];
+    const spacing = {};
+    if (attrs.spaceBefore != null) spacing.before = ptToTwips(attrs.spaceBefore);
+    if (attrs.spaceAfter != null) spacing.after = ptToTwips(attrs.spaceAfter);
+    if (attrs.lineHeight) spacing.line = Math.round(parseFloat(attrs.lineHeight) * 240);
+    if (Object.keys(spacing).length) o.spacing = spacing;
+    const indent = {};
+    if (attrs.indent) indent.left = Math.round(attrs.indent * TWIPS_PER_PX);
+    if (attrs.firstLineIndent > 0) indent.firstLine = Math.round(attrs.firstLineIndent * TWIPS_PER_PX);
+    if (attrs.firstLineIndent < 0) indent.hanging = Math.round(-attrs.firstLineIndent * TWIPS_PER_PX);
+    if (Object.keys(indent).length) o.indent = indent;
+    return o;
+  }
+
+  blocks(nodes = [], ctx = {}) {
+    const out = [];
+    for (const n of nodes) out.push(...this.block(n, ctx));
+    return out;
+  }
+
+  block(n, ctx) {
+    const extra = ctx.paragraph || {};
+    switch (n.type) {
+      case 'paragraph': {
+        const o = { ...this.paragraphOptions(n.attrs), ...extra };
+        if (n.attrs?.styleId && STYLE_IDS[n.attrs.styleId]) o.style = STYLE_IDS[n.attrs.styleId];
+        const runs = this.runs(n.content, ctx.run);
+        if (ctx.taskPrefix) runs.unshift(new TextRun({ text: ctx.taskPrefix }));
+        return [new Paragraph({ ...o, children: runs })];
+      }
+      case 'heading':
+        return [new Paragraph({ ...this.paragraphOptions(n.attrs), ...extra, heading: HEADINGS[n.attrs?.level || 1], children: this.runs(n.content, ctx.run) })];
+      case 'blockquote':
+        return this.blocks(n.content, {
+          ...ctx,
+          paragraph: {
+            ...extra,
+            style: 'Quote',
+          },
+        });
+      case 'codeBlock': {
+        const lines = (n.content || []).map((t) => t.text || '').join('').split('\n');
+        return lines.map((line, i) => new Paragraph({
+          ...extra,
+          spacing: { before: 0, after: i === lines.length - 1 ? 160 : 0, line: 240 },
+          shading: { type: ShadingType.CLEAR, fill: 'F5F5F5', color: 'auto' },
+          children: [new TextRun({ text: line || ' ', font: 'Consolas', size: 20 })],
+        }));
+      }
+      case 'horizontalRule':
+        return [new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'A6A6A6', space: 1 } }, children: [] })];
+      case 'pageBreak':
+        return [new Paragraph({ children: [new PageBreak()] })];
+      case 'tableOfContents':
+        return [new TableOfContents('Contents', { hyperlink: true, headingStyleRange: '1-3' })];
+      case 'bulletList':
+      case 'orderedList':
+      case 'taskList': {
+        const level = ctx.listLevel ?? 0;
+        const instance = n.type === 'orderedList' ? ++this.listInstance : 0;
+        const out = [];
+        for (const item of n.content || []) {
+          const [first, ...rest] = item.content || [];
+          const numbering = n.type === 'orderedList'
+            ? { numbering: { reference: 'lw-ordered', level: Math.min(level, 8), instance } }
+            : n.type === 'bulletList'
+              ? { numbering: { reference: 'lw-bullet', level: Math.min(level, 8) } }
+              : { indent: { left: 360 * (level + 1), hanging: 360 } };
+          const taskPrefix = n.type === 'taskList' ? (item.attrs?.checked ? '☒ ' : '☐ ') : null;
+          if (first) out.push(...this.block(first, { ...ctx, paragraph: { ...extra, ...numbering }, taskPrefix, listLevel: level }));
+          for (const child of rest) {
+            const nested = ['bulletList', 'orderedList', 'taskList'].includes(child.type);
+            out.push(...this.block(child, { ...ctx, listLevel: nested ? level + 1 : level, paragraph: nested ? extra : { ...extra, indent: { left: 720 * (level + 1) } }, taskPrefix: null }));
+          }
+        }
+        return out;
+      }
+      case 'table':
+        return [this.table(n)];
+      default:
+        return n.content ? this.blocks(n.content, ctx) : [];
+    }
+  }
+
+  table(n) {
+    const rows = n.content || [];
+    const firstRow = rows[0]?.content || [];
+    const colCount = firstRow.reduce((s, c) => s + (c.attrs?.colspan || 1), 0) || 1;
+    const widths = [];
+    for (const c of firstRow) {
+      const span = c.attrs?.colspan || 1;
+      const cw = c.attrs?.colwidth;
+      for (let i = 0; i < span; i++) widths.push(cw?.[i] || null);
+    }
+    const known = widths.filter(Boolean).reduce((a, b) => a + b, 0);
+    const unknown = widths.filter((w) => !w).length;
+    const total = this.geometry.contentWidth;
+    const fill = unknown ? Math.max(36, (total - known) / unknown) : 0;
+    const columnWidths = widths.map((w) => Math.round((w || fill) * TWIPS_PER_PX));
+    const border = { style: BorderStyle.SINGLE, size: 4, color: 'BFBFBF' };
+    return new Table({
+      width: { size: columnWidths.reduce((a, b) => a + b, 0), type: WidthType.DXA },
+      columnWidths,
+      borders: { top: border, bottom: border, left: border, right: border, insideHorizontal: border, insideVertical: border },
+      rows: rows.map((row, ri) => new TableRow({
+        tableHeader: ri === 0 && (row.content || []).every((c) => c.type === 'tableHeader'),
+        children: (row.content || []).map((cell) => {
+          const children = this.blocks(cell.content, { run: cell.type === 'tableHeader' ? { bold: true } : undefined });
+          return new TableCell({
+            children: children.length ? children : [new Paragraph({})],
+            columnSpan: cell.attrs?.colspan > 1 ? cell.attrs.colspan : undefined,
+            rowSpan: cell.attrs?.rowspan > 1 ? cell.attrs.rowspan : undefined,
+            shading: cell.attrs?.backgroundColor
+              ? { type: ShadingType.CLEAR, fill: cssColorToHex(cell.attrs.backgroundColor) || 'auto', color: 'auto' }
+              : cell.type === 'tableHeader' ? { type: ShadingType.CLEAR, fill: 'F2F2F2', color: 'auto' } : undefined,
+            margins: { top: 60, bottom: 60, left: 100, right: 100 },
+          });
+        }),
+      })),
+    });
+  }
+}
+
+const BULLETS = ['•', '◦', '▪', '•', '◦', '▪', '•', '◦', '▪'];
+const ORDERED_FORMATS = [LevelFormat.DECIMAL, LevelFormat.LOWER_LETTER, LevelFormat.LOWER_ROMAN];
+
+function headerFooter(text, pageNumbers, isFooter) {
+  const children = [];
+  if (text) children.push(new TextRun({ text, color: '595959', size: 18 }));
+  if (isFooter && pageNumbers) {
+    if (text) children.push(new TextRun({ text: '   ' }));
+    children.push(new TextRun({ children: ['Page ', PageNumber.CURRENT, ' of ', PageNumber.TOTAL_PAGES], color: '595959', size: 18 }));
+  }
+  if (!children.length) return undefined;
+  const p = new Paragraph({ alignment: isFooter ? AlignmentType.CENTER : AlignmentType.RIGHT, children });
+  return isFooter ? new Footer({ children: [p] }) : new Header({ children: [p] });
+}
+
+export async function buildDocx(json, settings, { title = 'Document', author = 'LibreWord' } = {}) {
+  const geometry = pageGeometry(settings);
+  const images = await collectImages(json);
+  const conv = new Converter(images, geometry);
+  const children = conv.blocks(json.content || []);
+  const hasToc = JSON.stringify(json).includes('"tableOfContents"');
+  const landscape = settings.orientation === 'landscape';
+  const heading = (size, color, before, extra = {}) => ({
+    run: { font: 'Calibri Light', size, color, ...extra },
+    paragraph: { spacing: { before, after: 0, line: 259 }, keepNext: true, keepLines: true },
+  });
+
+  const header = headerFooter(settings.header, false, false);
+  const footer = headerFooter(settings.footer, settings.pageNumbers, true);
+
+  return new Document({
+    creator: author,
+    title,
+    features: hasToc ? { updateFields: true } : undefined,
+    styles: {
+      default: {
+        document: { run: { font: 'Calibri', size: 22 }, paragraph: { spacing: { after: 160, line: 276 } } },
+        heading1: heading(32, '2F5496', 240),
+        heading2: heading(26, '2F5496', 40),
+        heading3: heading(24, '1F3763', 40),
+        heading4: heading(22, '2F5496', 40, { italics: true }),
+        heading5: heading(22, '2F5496', 40),
+        heading6: heading(22, '1F3763', 40),
+        title: { run: { font: 'Calibri Light', size: 56 }, paragraph: { spacing: { after: 80, line: 240 } } },
+        hyperlink: { run: { color: '0563C1', underline: { type: UnderlineType.SINGLE } } },
+      },
+      paragraphStyles: [
+        { id: 'Subtitle', name: 'Subtitle', basedOn: 'Normal', next: 'Normal', run: { color: '5A5A5A', size: 22, characterSpacing: 15 }, paragraph: { spacing: { after: 160 } } },
+        { id: 'Quote', name: 'Quote', basedOn: 'Normal', next: 'Normal', run: { italics: true, color: '404040' }, paragraph: { alignment: AlignmentType.CENTER, spacing: { before: 200, after: 160 }, indent: { left: 864, right: 864 } } },
+        { id: 'IntenseQuote', name: 'Intense Quote', basedOn: 'Normal', next: 'Normal', run: { italics: true, color: '2F5496' }, paragraph: { alignment: AlignmentType.CENTER, spacing: { before: 360, after: 360 }, indent: { left: 864, right: 864 }, border: { top: { style: BorderStyle.SINGLE, size: 4, color: '2F5496', space: 10 }, bottom: { style: BorderStyle.SINGLE, size: 4, color: '2F5496', space: 10 } } } },
+        { id: 'Caption', name: 'Caption', basedOn: 'Normal', next: 'Normal', run: { italics: true, color: '44546A', size: 18 }, paragraph: { spacing: { after: 200, line: 240 } } },
+        { id: 'NoSpacing', name: 'No Spacing', basedOn: 'Normal', next: 'NoSpacing', paragraph: { spacing: { after: 0, line: 240 } } },
+      ],
+    },
+    numbering: {
+      config: [
+        {
+          reference: 'lw-bullet',
+          levels: BULLETS.map((text, level) => ({
+            level, format: LevelFormat.BULLET, text, alignment: AlignmentType.LEFT,
+            style: { paragraph: { indent: { left: 720 * (level + 1), hanging: 360 } } },
+          })),
+        },
+        {
+          reference: 'lw-ordered',
+          levels: Array.from({ length: 9 }, (_, level) => ({
+            level, format: ORDERED_FORMATS[level % 3], text: `%${level + 1}.`, alignment: AlignmentType.LEFT,
+            style: { paragraph: { indent: { left: 720 * (level + 1), hanging: 360 } } },
+          })),
+        },
+      ],
+    },
+    sections: [
+      {
+        properties: {
+          page: {
+            size: {
+              width: Math.round((landscape ? geometry.height : geometry.width) * TWIPS_PER_PX),
+              height: Math.round((landscape ? geometry.width : geometry.height) * TWIPS_PER_PX),
+              orientation: landscape ? PageOrientation.LANDSCAPE : PageOrientation.PORTRAIT,
+            },
+            margin: {
+              top: Math.round(settings.margins.top * TWIPS_PER_PX),
+              right: Math.round(settings.margins.right * TWIPS_PER_PX),
+              bottom: Math.round(settings.margins.bottom * TWIPS_PER_PX),
+              left: Math.round(settings.margins.left * TWIPS_PER_PX),
+              header: 708,
+              footer: 708,
+            },
+          },
+        },
+        headers: header ? { default: header } : undefined,
+        footers: footer ? { default: footer } : undefined,
+        children: children.length ? children : [new Paragraph({})],
+      },
+    ],
+  });
+}
+
+export async function docxBlob(json, settings, meta) {
+  return Packer.toBlob(await buildDocx(json, settings, meta));
+}
+
+export async function docxBuffer(json, settings, meta) {
+  return Packer.toBuffer(await buildDocx(json, settings, meta));
+}

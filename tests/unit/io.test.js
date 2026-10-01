@@ -1,0 +1,157 @@
+import { describe, it, expect } from 'vitest';
+import mammoth from 'mammoth';
+import { getSchema } from '@tiptap/core';
+import { Node as PMNode } from '@tiptap/pm/model';
+import { buildExtensions } from '../../src/editor/create-editor.js';
+import { jsonToMarkdown } from '../../src/io/markdown.js';
+import { docxBuffer, cssColorToHex, fontSizeToHalfPoints } from '../../src/io/docx.js';
+import { rtfToText, textToHtml, sanitizeHtml, markdownToHtml } from '../../src/io/import.js';
+import { cssLengthToPx, parseLineHeight } from '../../src/editor/paragraph-format.js';
+import { buildRegExp, findMatches } from '../../src/editor/search.js';
+import { DEFAULT_SETTINGS } from '../../src/storage/db.js';
+
+const schema = getSchema(buildExtensions());
+const p = (...content) => ({ type: 'paragraph', content });
+const t = (text, marks) => ({ type: 'text', text, ...(marks ? { marks } : {}) });
+
+const sampleDoc = {
+  type: 'doc',
+  content: [
+    { type: 'heading', attrs: { level: 1 }, content: [t('Title')] },
+    p(t('Plain '), t('bold', [{ type: 'bold' }]), t(' and '), t('italic', [{ type: 'italic' }]), t(' and '), t('link', [{ type: 'link', attrs: { href: 'https://example.com' } }])),
+    { type: 'bulletList', content: [{ type: 'listItem', content: [p(t('one'))] }, { type: 'listItem', content: [p(t('two'))] }] },
+    { type: 'orderedList', attrs: { start: 1 }, content: [{ type: 'listItem', content: [p(t('first'))] }] },
+    { type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: true }, content: [p(t('done'))] }] },
+    {
+      type: 'table',
+      content: [
+        { type: 'tableRow', content: [{ type: 'tableHeader', content: [p(t('H1'))] }, { type: 'tableHeader', content: [p(t('H2'))] }] },
+        { type: 'tableRow', content: [{ type: 'tableCell', content: [p(t('a'))] }, { type: 'tableCell', content: [p(t('b|c'))] }] },
+      ],
+    },
+    { type: 'pageBreak' },
+    { type: 'codeBlock', attrs: { language: 'js' }, content: [t('let x = 1;\nx++;')] },
+    { type: 'blockquote', content: [p(t('quoted'))] },
+  ],
+};
+
+describe('schema', () => {
+  it('accepts the sample document', () => {
+    expect(() => PMNode.fromJSON(schema, sampleDoc).check()).not.toThrow();
+  });
+});
+
+describe('markdown export', () => {
+  const md = jsonToMarkdown(sampleDoc);
+  it('serializes headings, marks and links', () => {
+    expect(md).toContain('# Title');
+    expect(md).toContain('Plain **bold** and *italic* and [link](https://example.com)');
+  });
+  it('serializes lists and task lists', () => {
+    expect(md).toContain('- one\n- two');
+    expect(md).toContain('1. first');
+    expect(md).toContain('- [x] done');
+  });
+  it('serializes tables with escaped pipes', () => {
+    expect(md).toContain('| H1 | H2 |\n| --- | --- |\n| a | b\\|c |');
+  });
+  it('serializes code blocks and quotes', () => {
+    expect(md).toContain('```js\nlet x = 1;\nx++;\n```');
+    expect(md).toContain('> quoted');
+  });
+  it('escapes markdown control characters in text', () => {
+    expect(jsonToMarkdown({ type: 'doc', content: [p(t('2 * 3 = [6]'))] })).toBe('2 \\* 3 = \\[6\\]\n');
+  });
+});
+
+describe('docx export', () => {
+  it('round-trips through mammoth', async () => {
+    const buf = await docxBuffer(sampleDoc, DEFAULT_SETTINGS, { title: 'Test' });
+    expect(buf.subarray(0, 2).toString()).toBe('PK');
+    const { value } = await mammoth.convertToHtml({ buffer: buf });
+    expect(value).toContain('<h1>Title</h1>');
+    expect(value).toContain('<strong>bold</strong>');
+    expect(value).toContain('<em>italic</em>');
+    expect(value).toContain('<a href="https://example.com">link</a>');
+    expect(value).toMatch(/<ul><li>one<\/li><li>two<\/li><\/ul>/);
+    expect(value).toMatch(/<ol><li>first<\/li><\/ol>/);
+    expect(value).toContain('<table>');
+    expect(value).toContain('b|c');
+  });
+
+  it('embeds data-URL images', async () => {
+    // 1×1 transparent PNG
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+    const doc = { type: 'doc', content: [p({ type: 'image', attrs: { src: png, alt: 'dot' } })] };
+    const buf = await docxBuffer(doc, DEFAULT_SETTINGS, {});
+    const { value } = await mammoth.convertToHtml({ buffer: buf });
+    expect(value).toMatch(/<img [^>]*src="data:image\/png;base64,/);
+  });
+
+  it('converts colors and font sizes', () => {
+    expect(cssColorToHex('#abc')).toBe('AABBCC');
+    expect(cssColorToHex('rgb(255, 0, 128)')).toBe('FF0080');
+    expect(cssColorToHex('red')).toBe('FF0000');
+    expect(cssColorToHex('nonsense')).toBeUndefined();
+    expect(fontSizeToHalfPoints('12pt')).toBe(24);
+    expect(fontSizeToHalfPoints('16px')).toBe(24);
+  });
+});
+
+describe('import', () => {
+  it('converts text to escaped paragraphs', () => {
+    expect(textToHtml('a <b>\r\nc')).toBe('<p>a &lt;b&gt;</p><p>c</p>');
+  });
+  it('extracts text from simple RTF', () => {
+    const bs = String.fromCharCode(92);
+    const rtf = `{${bs}rtf1${bs}ansi{${bs}fonttbl${bs}f0 Arial;}${bs}f0 Hello ${bs}b World${bs}b0${bs}par Caf${bs}'e9 ${bs}u8364? ${bs}{x${bs}}${bs}par}`;
+    expect(rtfToText(rtf)).toBe('Hello World\nCafé € {x}');
+  });
+  it('sanitizes dangerous HTML', () => {
+    const out = sanitizeHtml('<p onclick="x()">hi<script>alert(1)</script><a href="javascript:alert(1)">l</a><img src="x" onerror="y()"></p>');
+    expect(out).not.toMatch(/script|onclick|onerror|javascript:/);
+    expect(out).toContain('hi');
+  });
+  it('converts GFM task lists from markdown', async () => {
+    const html = await markdownToHtml('- [x] done\n- [ ] todo\n');
+    expect(html).toContain('data-type="taskList"');
+    expect(html).toContain('data-checked="true"');
+    expect(html).not.toContain('<input');
+  });
+});
+
+describe('paragraph format parsing', () => {
+  it('parses CSS lengths', () => {
+    expect(cssLengthToPx('12pt')).toBe(16);
+    expect(cssLengthToPx('1in')).toBe(96);
+    expect(cssLengthToPx('2.54cm')).toBeCloseTo(96);
+    expect(cssLengthToPx('bogus')).toBeNull();
+  });
+  it('parses line heights', () => {
+    expect(parseLineHeight('1.5')).toBe('1.5');
+    expect(parseLineHeight('115%')).toBe('1.15');
+    expect(parseLineHeight('normal')).toBeNull();
+    expect(parseLineHeight('20px')).toBeNull();
+  });
+});
+
+describe('search', () => {
+  const doc = PMNode.fromJSON(schema, {
+    type: 'doc',
+    content: [p(t('The cat sat on the '), t('cat', [{ type: 'bold' }]), t('alog.')), p(t('Concatenate CAT'))],
+  });
+  it('finds case-insensitive matches across text nodes', () => {
+    const res = findMatches(doc, buildRegExp('catalog'));
+    expect(res).toHaveLength(1);
+    expect(doc.textBetween(res[0].from, res[0].to)).toBe('catalog');
+  });
+  it('respects case sensitivity and whole words', () => {
+    expect(findMatches(doc, buildRegExp('cat'))).toHaveLength(4);
+    expect(findMatches(doc, buildRegExp('cat', { caseSensitive: true }))).toHaveLength(3);
+    expect(findMatches(doc, buildRegExp('cat', { wholeWord: true }))).toHaveLength(2);
+  });
+  it('supports regular expressions and rejects invalid ones', () => {
+    expect(findMatches(doc, buildRegExp('c.t', { regex: true }))).toHaveLength(4);
+    expect(buildRegExp('(', { regex: true })).toBeNull();
+  });
+});
