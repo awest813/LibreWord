@@ -232,8 +232,9 @@ button { cursor: pointer; }
 .style-card:hover { border-color: var(--border-strong); }
 .style-card.is-active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .style-card .sample { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #000; line-height: 1.2; font-family: Calibri, Carlito, 'Segoe UI', sans-serif; }
-:root[data-theme='dark'] .style-card .sample { color: var(--text); }
-.style-card .name { font-size: 10.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Style previews always show ink on paper, like Word, so their colours stay legible in dark mode. */
+.style-card { background: #fff; }
+.style-card .name { font-size: 10.5px; color: #605e5c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .style-more { width: 20px; border: 0; background: transparent; border-radius: 3px; display: grid; place-items: center; }
 .style-more:hover { background: var(--surface-hover); }
 
@@ -546,7 +547,9 @@ kbd { font: 12px var(--font-ui); background: var(--surface-2); border: 1px solid
   .backstage-main { padding: 20px; }
 }
 @media (max-width: 600px) {
-  .save-state, .statusbar .sb-optional { display: none; }
+  .save-state, .statusbar .sb-optional, .zoom-slider, .statusbar .icon-btn[aria-label='Focus'], .statusbar .icon-btn[aria-label^='Zoom'] { display: none; }
+  .ribbon { min-height: 0; }
+  .titlebar > .icon-btn[aria-label^='Save'] { display: none; }
   .canvas-inner { padding: 0 8px 32px; }
   .start-inner { padding: 16px; }
   .doc-filter { width: 100%; }

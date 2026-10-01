@@ -62,7 +62,8 @@ export class EditorScreen {
     this.view = {
       layout: saved.layout === 'web' ? 'web' : 'print',
       ruler: saved.ruler !== false,
-      nav: Boolean(saved.nav),
+      // The navigation pane covers the page on narrow screens; start closed there.
+      nav: Boolean(saved.nav) && window.innerWidth > 900,
       marks: Boolean(saved.marks),
       spellcheck: saved.spellcheck !== false,
       zoom: Math.min(5, Math.max(0.1, Number(saved.zoom) || 1)),
@@ -126,6 +127,10 @@ export class EditorScreen {
     this.updateStats();
     this.nav.render();
     this.setZoom(this.view.zoom, { keepScroll: false });
+    // On phones, fit the page to the screen instead of scrolling sideways.
+    if (this.view.layout === 'print' && this.canvas.clientWidth < this.geometry.width * this.view.zoom + 48) {
+      this.zoomTo('width', { persist: false });
+    }
 
     // Keyboard shortcuts that live outside the editor.
     const onKey = (e) => this.handleKeydown(e);
@@ -447,7 +452,11 @@ export class EditorScreen {
   }
 
   sizeTitle() {
-    this.titleInput.style.width = `${Math.min(420, Math.max(80, this.titleInput.value.length * 8 + 24))}px`;
+    if (!this.measureCtx) this.measureCtx = document.createElement('canvas').getContext('2d');
+    const cs = getComputedStyle(this.titleInput);
+    this.measureCtx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const w = this.measureCtx.measureText(this.titleInput.value || 'Untitled document').width;
+    this.titleInput.style.width = `${Math.min(420, Math.max(80, Math.ceil(w) + 24))}px`;
   }
 
   // ------------------------------------------------------------------ persistence
@@ -519,7 +528,7 @@ export class EditorScreen {
     this.layoutBtns.print.classList.toggle('is-active', this.view.layout === 'print');
     this.layoutBtns.web.classList.toggle('is-active', this.view.layout === 'web');
     try {
-      localStorage.setItem(VIEW_KEY, JSON.stringify(this.view));
+      localStorage.setItem(VIEW_KEY, JSON.stringify({ ...this.view, zoom: this.savedZoom ?? this.view.zoom }));
     } catch {
       /* private mode */
     }
@@ -592,12 +601,13 @@ export class EditorScreen {
     else document.documentElement.requestFullscreen?.().catch(() => toast('Full screen is not available here.'));
   }
 
-  setZoom(z, { keepScroll = true } = {}) {
+  setZoom(z, { keepScroll = true, persist = true } = {}) {
     const zoom = Math.round(Math.min(5, Math.max(0.1, z)) * 100) / 100;
     const old = this.view.zoom;
     const c = this.canvas;
     const centerRatio = keepScroll && c.scrollHeight ? (c.scrollTop + c.clientHeight / 2) / c.scrollHeight : 0;
     this.view.zoom = zoom;
+    if (persist) this.savedZoom = zoom;
     this.pageStack.style.zoom = String(zoom);
     this.zoomLabel.textContent = `${Math.round(zoom * 100)}%`;
     this.zoomSlider.value = String(zoom <= 1 ? ((zoom - 0.1) / 0.9) * 50 : 50 + ((zoom - 1) / 4) * 50);
@@ -607,12 +617,12 @@ export class EditorScreen {
     this.applyView();
   }
 
-  zoomTo(mode) {
+  zoomTo(mode, opts) {
     const g = this.geometry;
     const w = this.canvas.clientWidth - 48;
     const hgt = this.canvas.clientHeight - (this.view.ruler ? 60 : 48);
-    if (mode === 'width') this.setZoom(w / g.width);
-    else this.setZoom(Math.min(w / g.width, hgt / g.height));
+    if (mode === 'width') this.setZoom(w / g.width, opts);
+    else this.setZoom(Math.min(w / g.width, hgt / g.height), opts);
   }
 
   goTo(pos) {
@@ -849,6 +859,13 @@ export class EditorScreen {
     // suggestions matter more than our menu: hold Shift for the native menu.
     if (event.shiftKey) return;
     event.preventDefault();
+    // Right-clicking outside the selection moves the caret there first (like Word).
+    const view = this.editor.view;
+    const hit = view.posAtCoords({ left: event.clientX, top: event.clientY });
+    const { from, to } = view.state.selection;
+    if (hit && (hit.pos < from || hit.pos > to)) {
+      view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(hit.pos))));
+    }
     import('./context-menu.js').then(({ showEditorContextMenu }) => showEditorContextMenu(this, event));
   }
 

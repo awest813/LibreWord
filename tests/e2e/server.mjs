@@ -1,7 +1,12 @@
 import { spawn } from 'node:child_process';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-export const CHROME = process.env.CHROME_PATH || '/opt/pw-browsers/chromium';
+import { existsSync } from 'node:fs';
+
+// Use CHROME_PATH or a preinstalled Chromium if present; otherwise let
+// Playwright use its own download (`npx playwright-core install chromium`).
+const PREINSTALLED = '/opt/pw-browsers/chromium';
+export const CHROME = process.env.CHROME_PATH || (existsSync(PREINSTALLED) ? PREINSTALLED : undefined);
 
 /** Start `vite preview` on `port` and resolve once it answers. */
 export async function startPreview(port) {
