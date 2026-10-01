@@ -691,6 +691,17 @@ export class Ribbon {
       this.tabButtons[t.id] = b;
       this.tabsEl.append(b);
     }
+    this.tabsEl.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'Home' && e.key !== 'End') return;
+      const tabs = [...this.tabsEl.querySelectorAll('.ribbon-tab')].filter((b) => !b.hidden);
+      const i = tabs.indexOf(document.activeElement);
+      if (i < 0) return;
+      e.preventDefault();
+      let next = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : i + (e.key === 'ArrowRight' ? 1 : -1);
+      next = (next + tabs.length) % tabs.length;
+      tabs[next].focus();
+      if (tabs[next].dataset.tab) this.select(tabs[next].dataset.tab);
+    });
     this.tabsEl.append(h('div', { class: 'ribbon-tabs-spacer' }));
     const collapse = h('button', { type: 'button', class: 'icon-btn', title: 'Collapse the ribbon (Ctrl+F1)', 'aria-label': 'Collapse the ribbon', html: icon('chevronUp') });
     collapse.addEventListener('click', () => this.toggleCollapsed());

@@ -172,3 +172,25 @@ describe('docx comments', () => {
     expect(body).toMatch(/<w:commentRangeStart w:id="0"\/>.*commented.*<w:commentRangeEnd w:id="0"\/>/s);
   });
 });
+
+describe('paste from Word', async () => {
+  const { cleanWordHtml, isWordHtml } = await import('../../src/io/paste.js');
+  const word = `<html xmlns:o="urn:schemas-microsoft-com:office:office"><body>
+<p class=MsoNormal>Intro<o:p></o:p></p>
+<p class=MsoListParagraphCxSpFirst style='text-indent:-.25in;mso-list:l0 level1 lfo1'><span style='mso-list:Ignore'>·<span>&nbsp;&nbsp;</span></span>Apple<o:p></o:p></p>
+<p class=MsoListParagraphCxSpMiddle style='margin-left:1.0in;text-indent:-.25in;mso-list:l0 level2 lfo1'><span style='mso-list:Ignore'>o<span>&nbsp;</span></span>Green<o:p></o:p></p>
+<p class=MsoListParagraphCxSpLast style='text-indent:-.25in;mso-list:l0 level1 lfo1'><span style='mso-list:Ignore'>·<span>&nbsp;</span></span>Banana<o:p></o:p></p>
+<p class=MsoNormal>Steps</p>
+<p class=MsoListParagraph style='text-indent:-.25in;mso-list:l1 level1 lfo2'><span style='mso-list:Ignore'>1.<span>&nbsp;</span></span>First</p>
+</body></html>`;
+  it('detects Word HTML', () => {
+    expect(isWordHtml(word)).toBe(true);
+    expect(isWordHtml('<p>plain</p>')).toBe(false);
+  });
+  it('rebuilds nested bullet and numbered lists', () => {
+    const out = cleanWordHtml(word).replace(/\s+/g, ' ');
+    expect(out).toMatch(/<ul><li><p[^>]*>Apple<\/p><ul><li><p[^>]*>Green<\/p><\/li><\/ul><\/li><li><p[^>]*>Banana<\/p><\/li><\/ul>/);
+    expect(out).toMatch(/<ol><li><p[^>]*>First<\/p><\/li><\/ol>/);
+    expect(out).not.toMatch(/mso-list|·|o:p|class="Mso/);
+  });
+});

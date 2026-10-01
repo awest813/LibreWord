@@ -4,6 +4,7 @@ import { pageGeometry, PAGE_SIZES, PX_PER_IN, PX_PER_CM, PX_PER_PT, usesInches }
 import { getDoc, saveDoc, addVersion, getVersion, createDoc } from '../storage/db.js';
 import { exportDocument, printCss, printDocument } from '../io/export.js';
 import { sanitizeHtml } from '../io/import.js';
+import { transformPastedHTML } from '../io/paste.js';
 import { h, toast, debounce, isPopoverOpen, closePopover } from './dom.js';
 import { icon } from './icons.js';
 import { Ribbon } from './ribbon.js';
@@ -104,6 +105,7 @@ export class EditorScreen {
       onSelectionUpdate: () => this.onSelectionChange(),
       onTransaction: () => this.scheduleUiUpdate(),
       editorProps: {
+        transformPastedHTML,
         handlePaste: (view, event) => this.handleFiles(event.clipboardData?.files, null),
         handleDrop: (view, event) => {
           const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
@@ -126,6 +128,17 @@ export class EditorScreen {
       },
     });
     this.editorEl = this.editor.view.dom;
+    // Double-clicking a page's top or bottom margin edits the header/footer, as in Word.
+    this.editorEl.addEventListener('dblclick', (e) => {
+      if (this.view.layout !== 'print') return;
+      const g = this.geometry;
+      const r = this.editorEl.getBoundingClientRect();
+      const y = ((e.clientY - r.top) / (r.width / g.width)) % (g.height + g.gap);
+      if (y < g.margins.top - 4 || (y > g.height - g.margins.bottom + 4 && y < g.height)) {
+        e.preventDefault();
+        this.headerFooterDialog();
+      }
+    });
     // Focus synchronously so keystrokes typed right after opening aren't lost.
     this.editor.view.focus();
     this.editorEl.setAttribute('spellcheck', String(this.view.spellcheck));
@@ -561,10 +574,8 @@ export class EditorScreen {
 
   async flush() {
     if (this.destroyed || !this.editor) return;
-    if (this.saveState === 'unsaved' || this.queueSave) {
-      this.queueSave.cancel();
-      if (this.saveState !== 'saved') await this.saveNow();
-    }
+    this.queueSave.cancel();
+    if (this.saveState !== 'saved') await this.saveNow();
     await this.saving;
   }
 
