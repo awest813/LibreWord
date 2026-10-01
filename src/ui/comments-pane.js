@@ -12,6 +12,8 @@ export class CommentsPane {
   constructor(app) {
     this.app = app;
     this.active = new Set();
+    this.drafts = new Map(); // unposted comment text survives re-renders
+    this.signature = '';
     this.list = h('div', { class: 'comments-list' });
     this.el = h(
       'aside',
@@ -54,14 +56,31 @@ export class CommentsPane {
   render({ focusId } = {}) {
     this.updateStyle();
     if (!this.visible) return;
-    const ranges = commentRanges(this.app.editor.state.doc);
+    const { doc } = this.app.editor.state;
+    const ranges = commentRanges(doc);
     const ids = [...ranges.entries()].sort((a, b) => a[1].from - b[1].from).map(([id]) => id).filter((id) => this.app.comments[id]);
+    // Skip rebuilding when nothing visible changed (most document edits).
+    const signature = JSON.stringify([focusId, ids.map((id) => [this.app.comments[id], doc.textBetween(ranges.get(id).from, ranges.get(id).to, ' ').slice(0, 80)])]);
+    if (signature === this.signature && !focusId) return;
+    this.signature = focusId ? '' : signature;
+    // Keep keyboard focus in a reply/comment box across the rebuild.
+    const focused = this.list.contains(document.activeElement) ? document.activeElement : null;
+    const refocus = focused && { id: focused.closest('.comment-card')?.dataset.id, cls: focused.className, start: focused.selectionStart, end: focused.selectionEnd, value: focused.value };
     this.list.replaceChildren();
     if (!ids.length) {
       this.list.append(h('div', { class: 'nav-empty' }, 'No comments yet. Select some text and choose New Comment (Ctrl+Alt+M).'));
       return;
     }
     for (const id of ids) this.list.append(this.card(this.app.comments[id], ranges.get(id), focusId === id));
+    if (refocus?.id && !focusId) {
+      const el = this.list.querySelector(`.comment-card[data-id="${CSS.escape(refocus.id)}"] ${refocus.cls ? `.${refocus.cls.split(' ')[0]}` : 'textarea'}`)
+        || this.list.querySelector(`.comment-card[data-id="${CSS.escape(refocus.id)}"] textarea`);
+      if (el) {
+        if (refocus.value != null) el.value = refocus.value;
+        el.focus();
+        el.setSelectionRange?.(refocus.start, refocus.end);
+      }
+    }
   }
 
   card(c, range, editing) {
@@ -81,16 +100,22 @@ export class CommentsPane {
     );
 
     if (editing || !c.text) {
-      const ta = h('textarea', { rows: '3', placeholder: 'Add a comment…', 'aria-label': 'Comment text' });
-      ta.value = c.text || '';
+      const ta = h('textarea', { class: 'comment-input', rows: '3', placeholder: 'Add a comment…', 'aria-label': 'Comment text' });
+      ta.value = this.drafts.get(c.id) ?? c.text ?? '';
+      ta.addEventListener('input', () => this.drafts.set(c.id, ta.value));
       const post = () => {
         const v = ta.value.trim();
         if (!v) return cancel();
+        this.drafts.delete(c.id);
         app.updateComment(c.id, { text: v });
       };
       const cancel = () => {
-        if (!c.text) app.deleteComment(c.id, { silent: true });
-        else this.render();
+        this.drafts.delete(c.id);
+        if (!c.text) app.deleteComment(c.id);
+        else {
+          this.signature = '';
+          this.render();
+        }
       };
       ta.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
@@ -104,7 +129,8 @@ export class CommentsPane {
         }
       });
       card.append(ta, h('div', { class: 'comment-buttons' }, h('button', { type: 'button', class: 'btn', onclick: cancel }, 'Cancel'), h('button', { type: 'button', class: 'btn btn-primary', onclick: post }, 'Post')));
-      requestAnimationFrame(() => ta.focus());
+      // Only take focus when the user just asked to write/edit this comment.
+      if (editing) requestAnimationFrame(() => ta.focus());
     } else {
       const text = h('p', { class: 'comment-text', title: 'Double-click to edit' }, c.text);
       text.addEventListener('dblclick', () => this.render({ focusId: c.id }));

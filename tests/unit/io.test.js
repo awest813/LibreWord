@@ -194,3 +194,11 @@ describe('paste from Word', async () => {
     expect(out).not.toMatch(/mso-list|·|o:p|class="Mso/);
   });
 });
+
+describe('search limits', async () => {
+  const { MAX_RESULTS } = await import('../../src/editor/search.js');
+  it('stops collecting matches at the cap', () => {
+    const many = PMNode.fromJSON(schema, { type: 'doc', content: Array.from({ length: 30 }, () => p(t('e'.repeat(500)))) });
+    expect(findMatches(many, buildRegExp('e'))).toHaveLength(MAX_RESULTS);
+  });
+});

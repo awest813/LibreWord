@@ -217,12 +217,14 @@ export async function importBackup(data) {
       result.skipped++;
       continue;
     }
+    const updatedAt = Number.isFinite(m.updatedAt) ? m.updatedAt : Date.parse(m.updatedAt) || 0;
+    const createdAt = Number.isFinite(m.createdAt) ? m.createdAt : Date.parse(m.createdAt) || updatedAt || Date.now();
     const existing = await meta.get(m.id);
-    if (existing && existing.updatedAt >= m.updatedAt) {
+    if (existing && existing.updatedAt >= updatedAt) {
       result.skipped++;
       continue;
     }
-    await meta.put({ ...m });
+    await meta.put({ ...m, updatedAt: updatedAt || Date.now(), createdAt });
     await content.put({ id: m.id, json: doc.content?.json ?? null, html: doc.content?.html ?? '', settings: doc.content?.settings, comments: doc.content?.comments || {} });
     result[existing ? 'updated' : 'added']++;
   }

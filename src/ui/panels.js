@@ -4,6 +4,7 @@ import { searchKey } from '../editor/search.js';
 import { collectHeadings } from '../editor/toc.js';
 import { TextSelection } from '@tiptap/pm/state';
 import { PX_PER_IN, PX_PER_CM, usesInches } from '../editor/page-setup.js';
+import { isDark } from './theme.js';
 
 // ---------------------------------------------------------------------------
 // Find & replace
@@ -342,7 +343,7 @@ export class Ruler {
     const ctx = this.canvas.getContext('2d');
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, width, hgt);
-    const dark = document.documentElement.dataset.theme === 'dark' || (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
+    const dark = isDark();
     ctx.strokeStyle = dark ? '#aaa' : '#666';
     ctx.fillStyle = dark ? '#ddd' : '#333';
     ctx.font = '10px "Segoe UI", system-ui, sans-serif';

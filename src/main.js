@@ -3,19 +3,12 @@ import { createDoc } from './storage/db.js';
 import { importFile } from './io/import.js';
 import { renderStartScreen, pickFile } from './ui/start.js';
 import { toast, h } from './ui/dom.js';
+import { toggleTheme } from './ui/theme.js';
 
 const root = document.getElementById('app');
 let screen = null; // current EditorScreen
 let routing = Promise.resolve();
 
-const toggleTheme = () => {
-  const el = document.documentElement;
-  const dark = el.dataset.theme === 'dark' || (!el.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
-  el.dataset.theme = dark ? 'light' : 'dark';
-  try {
-    localStorage.setItem('lw:theme', el.dataset.theme);
-  } catch { /* ignore */ }
-};
 
 const go = (hash) => {
   if (location.hash === hash) route();
@@ -60,10 +53,9 @@ async function showEditor(id) {
     onOpenDoc: (docId, { force } = {}) => {
       if (force && docId === screen?.docId) {
         // Reload from storage without saving the stale copy over it.
-        screen.destroyed = true;
-        screen.editor?.destroy();
+        const stale = screen;
         screen = null;
-        route();
+        stale.destroy({ save: false }).then(route);
       } else go(`#/doc/${docId}`);
     },
     onNewDoc: newFromTemplate,

@@ -1,5 +1,14 @@
 import { Extension } from '@tiptap/core';
 
+/** Word-like word count: runs of letters/digits, keeping contractions, emails and hyphenations whole. */
+export function countWords(text) {
+  const m = String(text).match(/[\p{L}\p{N}][\p{L}\p{N}'’\-_.@]*/gu);
+  return m ? m.length : 0;
+}
+
+/** Marks that carry content rather than formatting. */
+export const KEEP_MARKS = new Set(['comment', 'link']);
+
 export const FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72];
 
 /** The size (in pt) the selection is actually rendered at. */
@@ -80,8 +89,21 @@ export const WordCommands = Extension.create({
         const next = [...FONT_SIZES].reverse().find((s) => s < size) ?? Math.max(1, size - 1);
         return commands.setFontSize(`${next}pt`);
       },
+      /** Remove character formatting but keep comments and hyperlinks (they're content, not formatting). */
+      unsetFormattingMarks: () => ({ state, tr, dispatch }) => {
+        const { from, to, empty } = state.selection;
+        if (empty) {
+          if (dispatch) dispatch(tr.setStoredMarks((state.storedMarks || state.selection.$from.marks()).filter((m) => KEEP_MARKS.has(m.type.name))));
+          return true;
+        }
+        if (dispatch) {
+          for (const type of Object.values(state.schema.marks)) if (!KEEP_MARKS.has(type.name)) tr.removeMark(from, to, type);
+          dispatch(tr);
+        }
+        return true;
+      },
       clearFormatting: () => ({ chain }) =>
-        chain().unsetAllMarks().resetParagraphFormat().unsetTextAlign().run(),
+        chain().unsetFormattingMarks().resetParagraphFormat().unsetTextAlign().run(),
     };
   },
 
@@ -101,7 +123,7 @@ export const WordCommands = Extension.create({
       'Mod-=': () => e().commands.toggleSubscript(),
       'Mod-Shift-=': () => e().commands.toggleSuperscript(),
       'Mod-Shift-+': () => e().commands.toggleSuperscript(),
-      'Mod-Space': () => e().commands.unsetAllMarks(),
+      'Mod-Space': () => e().commands.unsetFormattingMarks(),
       'Shift-F3': () => e().commands.cycleCase(),
       'Mod-Shift-l': () => e().commands.toggleBulletList(),
     };

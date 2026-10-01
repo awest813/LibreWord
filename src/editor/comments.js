@@ -36,7 +36,8 @@ export const CommentMark = Mark.create({
         if (empty) {
           // Like Word: comment on the word at the cursor.
           const $pos = state.selection.$from;
-          const text = $pos.parent.textContent;
+          // One character per position: inline leaves (breaks, images) become U+FFFC.
+          const text = $pos.parent.textBetween(0, $pos.parent.content.size, undefined, '\ufffc');
           let a = $pos.parentOffset;
           let b = a;
           while (a > 0 && /[\p{L}\p{N}_'’-]/u.test(text[a - 1])) a--;

@@ -376,6 +376,38 @@ await test('comments: add, reply, resolve, persist and export', async () => {
   assert.doesNotMatch(await page.evaluate(() => window.libreword.editor.getHTML()), /data-comment-id/);
 });
 
+await test('review regressions: drafts, clear formatting, go to page', async () => {
+  await page.evaluate(() => window.libreword.editor.commands.setContent('<p>Alpha beta gamma delta.</p>'));
+  await page.evaluate(() => {
+    const ed = window.libreword.editor;
+    ed.commands.setTextSelection({ from: 7, to: 11 });
+  });
+  await page.evaluate(() => window.libreword.screen.addComment());
+  await page.waitForSelector('.comment-card textarea');
+  await page.fill('.comment-card textarea', 'half-written draft');
+  // Click back into the document and keep typing: the draft must survive.
+  await page.evaluate(() => window.libreword.editor.commands.focus('end'));
+  await settle();
+  await page.keyboard.type(' more');
+  await sleep(400);
+  assert.equal(await page.inputValue('.comment-card textarea'), 'half-written draft');
+  assert.match(await page.evaluate(() => window.libreword.editor.getText()), /delta\. more$/);
+  await page.click('.comment-card .btn-primary');
+  // Clear formatting keeps the comment anchor.
+  await page.evaluate(() => window.libreword.editor.chain().selectAll().toggleBold().clearFormatting().run());
+  const html = await page.evaluate(() => window.libreword.editor.getHTML());
+  assert.match(html, /data-comment-id/);
+  assert.doesNotMatch(html, /<strong>/);
+  // Go To a page far below the viewport.
+  await page.evaluate(() => window.libreword.editor.commands.setContent(Array.from({ length: 12 }, (_, i) => `<h2>Page ${i + 1}</h2><div data-page-break></div>`).join('') + '<p>end</p>'));
+  await settle();
+  await page.evaluate(() => { window.libreword.screen.canvas.scrollTop = 0; });
+  await page.keyboard.press('Control+g');
+  await page.fill('dialog input[name="page"]', '9');
+  await page.press('dialog input[name="page"]', 'Enter');
+  await page.waitForFunction(() => window.libreword.screen.statusPage.textContent.startsWith('Page 9 '));
+});
+
 await test('version history restores the pre-edit state', async () => {
   await page.click('.app-logo');
   await page.click('.template-card >> nth=1'); // Letter

@@ -2,6 +2,7 @@ import { h, showPopover, closePopover, menu, shortcutLabel } from './dom.js';
 import { icon } from './icons.js';
 import { FONT_SIZES, currentFontSizePt, currentFontFamily } from '../editor/word-commands.js';
 import { PAGE_SIZES, MARGIN_PRESETS, formatLength } from '../editor/page-setup.js';
+import { isDark } from './theme.js';
 
 export const FONTS = [
   { label: 'Calibri', value: 'Calibri, Carlito, sans-serif' },
@@ -619,7 +620,7 @@ export class Ribbon {
       ),
       G(
         'Appearance',
-        B({ icon: 'moon', label: 'Dark Mode', large: true, run: () => a.toggleTheme(), active: () => document.documentElement.dataset.theme === 'dark' }),
+        B({ icon: 'moon', label: 'Dark Mode', large: true, run: () => a.toggleTheme(), active: () => isDark() }),
         B({ icon: 'fullscreen', label: 'Full Screen', large: true, run: () => a.toggleFullscreen() }),
       ),
     ];

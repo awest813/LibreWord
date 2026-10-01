@@ -1,5 +1,7 @@
 import { TextSelection } from '@tiptap/pm/state';
 import { createEditor } from '../editor/create-editor.js';
+import { KEEP_MARKS, countWords } from '../editor/word-commands.js';
+import { toggleTheme } from './theme.js';
 import { pageGeometry, PAGE_SIZES, PX_PER_IN, PX_PER_CM, PX_PER_PT, usesInches } from '../editor/page-setup.js';
 import { getDoc, saveDoc, addVersion, getVersion, createDoc } from '../storage/db.js';
 import { exportDocument, printCss, printDocument } from '../io/export.js';
@@ -24,10 +26,6 @@ const loadView = () => {
   }
 };
 
-const countWords = (text) => {
-  const m = text.match(/[\p{L}\p{N}][\p{L}\p{N}'’\-_.@]*/gu);
-  return m ? m.length : 0;
-};
 
 const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('libreword') : null;
 const TAB_ID = Math.random().toString(36).slice(2);
@@ -74,6 +72,7 @@ export class EditorScreen {
     };
     this.pageCount = 1;
     this.saveState = 'saved';
+    this.rev = 0; // bumped on every edit; a save only counts as "saved" if no edit raced it
     this.painterActive = false;
     this.speaking = false;
     this.destroyed = false;
@@ -106,7 +105,12 @@ export class EditorScreen {
       onTransaction: () => this.scheduleUiUpdate(),
       editorProps: {
         transformPastedHTML,
-        handlePaste: (view, event) => this.handleFiles(event.clipboardData?.files, null),
+        handlePaste: (view, event) => {
+          // Office apps put a picture of the selection on the clipboard next to
+          // the HTML; prefer the HTML so text stays text.
+          if (event.clipboardData?.types?.includes('text/html')) return false;
+          return this.handleFiles(event.clipboardData?.files, null);
+        },
         handleDrop: (view, event) => {
           const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
           return this.handleFiles(event.dataTransfer?.files, pos);
@@ -201,9 +205,9 @@ export class EditorScreen {
     return true;
   }
 
-  async destroy() {
+  async destroy({ save = true } = {}) {
     if (this.destroyed) return;
-    await this.flush();
+    if (save) await this.flush();
     this.destroyed = true;
     if (this.speaking) speechSynthesis.cancel();
     closePopover();
@@ -424,6 +428,7 @@ export class EditorScreen {
   onDocChange(transaction) {
     // Plugin housekeeping (e.g. the trailing paragraph) isn't a user edit.
     if (!transaction?.getMeta('appendedTransaction')) this.userEdited = true;
+    this.rev++;
     this.setSaveState('unsaved');
     this.queueSave();
     this.statsDebounced();
@@ -501,12 +506,17 @@ export class EditorScreen {
       return this.saving;
     }
     this.setSaveState('saving');
+    const rev = this.rev;
     const { state } = this.editor;
     const preview = state.doc.textBetween(0, Math.min(state.doc.content.size, 1200), ' ', ' ').replace(/\s+/g, ' ').trim().slice(0, 280);
     if (this.words == null) this.updateStats();
     this.saving = saveDoc(this.docId, { json: this.editor.getJSON(), preview, words: this.words, title: this.title, settings: this.settings, comments: this.comments })
       .then(() => {
-        this.setSaveState('saved');
+        // Edits made while the write was in flight still need saving.
+        if (this.rev !== rev) {
+          this.setSaveState('unsaved');
+          this.queueSave();
+        } else this.setSaveState('saved');
         this.maybeSnapshot();
         channel?.postMessage({ type: 'saved', id: this.docId, tab: TAB_ID });
         if (announce) toast('Saved to this device', { type: 'success', timeout: 1800 });
@@ -574,9 +584,15 @@ export class EditorScreen {
 
   async flush() {
     if (this.destroyed || !this.editor) return;
-    this.queueSave.cancel();
-    if (this.saveState !== 'saved') await this.saveNow();
-    await this.saving;
+    for (let i = 0; i < 5; i++) {
+      this.queueSave.cancel();
+      if (this.saving) {
+        await this.saving;
+        continue;
+      }
+      if (this.saveState === 'saved') break;
+      await this.saveNow();
+    }
   }
 
   rename(title) {
@@ -663,12 +679,7 @@ export class EditorScreen {
   }
 
   toggleTheme() {
-    const root = document.documentElement;
-    const isDark = root.dataset.theme === 'dark' || (!root.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
-    root.dataset.theme = isDark ? 'light' : 'dark';
-    try {
-      localStorage.setItem('lw:theme', root.dataset.theme);
-    } catch { /* ignore */ }
+    toggleTheme();
     this.ruler.render();
     this.ribbon.update();
   }
@@ -878,7 +889,7 @@ export class EditorScreen {
     const ed = this.editor;
     if (this.painterActive) return this.endPainter();
     const marks = ed.state.storedMarks || ed.state.selection.$from.marks();
-    this.painterMarks = marks.map((m) => ({ type: m.type.name, attrs: m.attrs }));
+    this.painterMarks = marks.filter((m) => !KEEP_MARKS.has(m.type.name)).map((m) => ({ type: m.type.name, attrs: m.attrs }));
     this.painterActive = true;
     this.editorEl.classList.add('painter-active');
     this.ribbon.update();
@@ -887,7 +898,7 @@ export class EditorScreen {
         if (!this.painterActive) return;
         const { empty } = ed.state.selection;
         if (empty) return;
-        const chain = ed.chain().focus().unsetAllMarks();
+        const chain = ed.chain().focus().unsetFormattingMarks();
         for (const m of this.painterMarks) chain.setMark(m.type, m.attrs);
         chain.run();
         this.endPainter();

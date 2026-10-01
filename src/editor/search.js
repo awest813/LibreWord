@@ -3,6 +3,7 @@ import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 
 export const searchKey = new PluginKey('search');
+export const MAX_RESULTS = 10000;
 
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -24,7 +25,9 @@ export function buildRegExp(term, { caseSensitive = false, wholeWord = false, re
 export function findMatches(doc, re) {
   const results = [];
   if (!re) return results;
+  let full = false;
   doc.descendants((node, pos) => {
+    if (full) return false;
     if (!node.isTextblock) return true;
     let text = '';
     const map = []; // [textOffset, docPos] per text-ish chunk
@@ -53,7 +56,10 @@ export function findMatches(doc, re) {
         continue;
       }
       results.push({ from: toDoc(m.index), to: toDoc(m.index + m[0].length), match: m });
-      if (results.length > 10000) return false;
+      if (results.length >= MAX_RESULTS) {
+        full = true;
+        return false;
+      }
     }
     return false;
   });

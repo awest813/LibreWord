@@ -2,6 +2,7 @@ import { h, shortcutLabel } from './dom.js';
 import { openDialog, promptDialog } from './dialog.js';
 import { PAGE_SIZES } from '../editor/page-setup.js';
 import { units } from './editor-screen.js';
+import { countWords } from '../editor/word-commands.js';
 
 const num = (v, fallback = 0) => {
   const n = parseFloat(v);
@@ -83,7 +84,7 @@ export function wordCountDialog(app) {
   const { from, to, empty } = state.selection;
   const range = empty ? [0, state.doc.content.size] : [from, to];
   const text = state.doc.textBetween(range[0], range[1], '\n', ' ');
-  const words = (text.match(/[\p{L}\p{N}][\p{L}\p{N}'’\-_.@]*/gu) || []).length;
+  const words = countWords(text);
   let paragraphs = 0;
   state.doc.nodesBetween(range[0], range[1], (n) => {
     if (n.isTextblock && n.textContent.trim()) paragraphs++;
@@ -143,9 +144,15 @@ export async function goToPageDialog(app) {
   if (!r) return;
   const page = Math.max(1, Math.min(app.pageCount, Math.round(num(r.page, 1))));
   const g = app.geometry;
-  const rootRect = app.editorEl.getBoundingClientRect();
-  const z = rootRect.width / g.width;
-  const y = rootRect.top + ((page - 1) * (g.height + g.gap) + g.margins.top + 2) * z;
+  const pageTop = () => {
+    const rootRect = app.editorEl.getBoundingClientRect();
+    const z = rootRect.width / g.width;
+    return { rootRect, z, y: rootRect.top + ((page - 1) * (g.height + g.gap) + g.margins.top + 2) * z };
+  };
+  // posAtCoords only sees what's on screen, so scroll the page into view first.
+  const canvasTop = app.canvas.getBoundingClientRect().top;
+  app.canvas.scrollTop += pageTop().y - canvasTop - 60;
+  const { rootRect, z, y } = pageTop();
   const pos = app.editor.view.posAtCoords({ left: rootRect.left + (g.margins.left + 4) * z, top: y });
   if (pos) app.goTo(pos.pos);
 }
