@@ -7,6 +7,7 @@ export function sanitizeHtml(html) {
     USE_PROFILES: { html: true },
     FORBID_TAGS: ['style', 'script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'select', 'textarea', 'meta', 'link'],
     FORBID_ATTR: ['onerror', 'onload', 'onclick'],
+    ADD_ATTR: ['colwidth'], // table column widths (prosemirror-tables)
     ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel):|data:image\/(?:png|gif|jpe?g|webp|svg\+xml|bmp);base64,|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
   });
 }
@@ -91,6 +92,18 @@ const MAMMOTH_STYLE_MAP = [
   'highlight => mark',
 ];
 
+/** Formatting-preserving import; falls back to mammoth for unusual files. */
+export async function importDocx(arrayBuffer) {
+  try {
+    const { readDocx } = await import('./docx-import.js');
+    const result = await readDocx(arrayBuffer);
+    return { ...result, html: sanitizeHtml(result.html) };
+  } catch (err) {
+    console.warn('Native .docx import failed, falling back to mammoth', err);
+    return { html: await docxToHtml(arrayBuffer), settings: {}, comments: {}, title: '' };
+  }
+}
+
 export async function docxToHtml(arrayBuffer) {
   const mammoth = await import('mammoth');
   const lib = mammoth.default || mammoth;
@@ -109,12 +122,15 @@ export async function docxToHtml(arrayBuffer) {
 
 const stripExtension = (name) => name.replace(/\.[^.]+$/, '') || name;
 
-/** Convert a File into { title, html } for a new document. */
+/** Convert a File into { title, html, settings?, comments? } for a new document. */
 export async function importFile(file) {
   const name = file.name || 'Imported document';
   const ext = (name.match(/\.([^.]+)$/)?.[1] || '').toLowerCase();
   const title = stripExtension(name);
-  if (ext === 'docx') return { title, html: await docxToHtml(await file.arrayBuffer()) };
+  if (ext === 'docx') {
+    const r = await importDocx(await file.arrayBuffer());
+    return { title: r.title || title, html: r.html, settings: r.settings, comments: r.comments };
+  }
   if (ext === 'md' || ext === 'markdown') return { title, html: await markdownToHtml(await file.text()) };
   if (ext === 'html' || ext === 'htm') {
     const raw = await file.text();

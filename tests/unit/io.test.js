@@ -202,3 +202,54 @@ describe('search limits', async () => {
     expect(findMatches(many, buildRegExp('e'))).toHaveLength(MAX_RESULTS);
   });
 });
+
+describe('docx import', async () => {
+  const { readDocx } = await import('../../src/io/docx-import.js');
+  const mark = [{ type: 'comment', attrs: { id: 'c1' } }];
+  const doc = {
+    type: 'doc',
+    content: [
+      { type: 'heading', attrs: { level: 2 }, content: [t('Section')] },
+      { type: 'paragraph', attrs: { textAlign: 'center', lineHeight: '2', spaceAfter: 0 }, content: [t('Centered '), t('red', [{ type: 'textStyle', attrs: { color: '#ff0000', fontSize: '14pt', fontFamily: 'Georgia, serif' } }]), t(' note', mark)] },
+      { type: 'paragraph', attrs: { styleId: 'quote' }, content: [t('A quote')] },
+      ...sampleDoc.content.slice(1),
+    ],
+  };
+  const settings = { ...DEFAULT_SETTINGS, pageSize: 'a4', orientation: 'landscape', margins: { top: 48, bottom: 48, left: 72, right: 72 }, header: 'ACME', footer: 'Draft', pageNumbers: true };
+  const comments = { c1: { id: 'c1', author: 'Ada', initials: 'A', date: Date.UTC(2026, 0, 2), text: 'Check', resolved: true, replies: [{ author: 'Bob', date: Date.UTC(2026, 0, 3), text: 'OK' }] } };
+
+  it('round-trips LibreWord .docx exports with formatting', async () => {
+    const buf = await docxBuffer(doc, settings, { comments });
+    const r = await readDocx(buf);
+    const html = r.html.replace(/\s+/g, ' ');
+    expect(html).toContain('<h2>Section</h2>');
+    expect(html).toMatch(/<p style="text-align: center; line-height: 2; margin-bottom: 0pt">Centered /);
+    expect(html).toMatch(/color: #ff0000; font-size: 14pt; font-family: Georgia/);
+    expect(html).toContain('<p data-style="quote">A quote</p>');
+    expect(html).toMatch(/<strong>bold<\/strong>/);
+    expect(html).toMatch(/<a href="https:\/\/example.com">/);
+    expect(html).toMatch(/<ul><li><p>one<\/p><\/li><li><p>two<\/p><\/li><\/ul>/);
+    expect(html).toMatch(/<ol><li><p>first<\/p><\/li><\/ol>/);
+    expect(html).toMatch(/<table><tbody><tr><th[^>]*><p><strong>H1<\/strong><\/p><\/th>.*<tr><td[^>]*><p>a<\/p><\/td>/);
+    expect(html).toContain('<ul data-type="taskList"><li data-type="taskItem" data-checked="true"><p>done</p></li></ul>');
+    expect(html).not.toMatch(/<p><\/p><div data-page-break>/);
+    expect(html).toContain('<div data-page-break></div>');
+    expect(html).toMatch(/<span data-comment-id="d0">[^<]*note<\/span>/);
+  });
+
+  it('reads page setup, header/footer and threaded comments', async () => {
+    const r = await readDocx(await docxBuffer(doc, settings, { comments }));
+    expect(r.settings).toMatchObject({ pageSize: 'a4', orientation: 'landscape', margins: { top: 48, bottom: 48, left: 72, right: 72 }, header: 'ACME', footer: 'Draft', pageNumbers: true });
+    expect(r.comments.d0).toMatchObject({ author: 'Ada', text: 'Check', resolved: true });
+    expect(r.comments.d0.replies).toEqual([expect.objectContaining({ author: 'Bob', text: 'OK' })]);
+  });
+
+  it('nests multi-level lists', async () => {
+    const nested = { type: 'doc', content: [{ type: 'bulletList', content: [
+      { type: 'listItem', content: [p(t('a')), { type: 'bulletList', content: [{ type: 'listItem', content: [p(t('a1'))] }] }] },
+      { type: 'listItem', content: [p(t('b'))] },
+    ] }] };
+    const r = await readDocx(await docxBuffer(nested, DEFAULT_SETTINGS, {}));
+    expect(r.html).toBe('<ul><li><p>a</p><ul><li><p>a1</p></li></ul></li><li><p>b</p></li></ul>');
+  });
+});

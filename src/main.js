@@ -22,8 +22,8 @@ async function newFromTemplate(t) {
 
 async function importAndOpen(file) {
   try {
-    const { title, html } = await importFile(file);
-    const id = await createDoc({ title, html });
+    const { title, html, settings, comments } = await importFile(file);
+    const id = await createDoc({ title, html, settings: settings || {}, comments: comments || {} });
     go(`#/doc/${id}`);
     toast(`Opened “${file.name}”`, { type: 'success' });
   } catch (err) {

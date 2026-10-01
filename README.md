@@ -21,7 +21,8 @@ LibreWord looks and works like a desktop word processor: a ribbon, real pages wi
 | **Insert** | Tables (grid picker, merge/split, header rows, shading, resizable columns), pictures (file, paste, drag & drop, URL; resizable), links, symbols, date & time, horizontal lines, code blocks, live **table of contents** with page numbers |
 | **Review & navigation** | Find & replace (match case, whole word, regex), navigation pane (outline + search results), word count, browser spell check, read aloud, go to page |
 | **View** | Print/Web layout, ruler with draggable margins and indent, zoom 10–500 % (Ctrl + wheel, one page, page width), formatting marks, focus mode, dark mode, full screen |
-| **Files** | Export **.docx**, **PDF** (vector, via the print dialog), **HTML**, **Markdown**, **plain text**. Import **.docx**, **.md**, **.html**, **.txt**, **.rtf** — or just drop a file on the window |
+| **Files** | Export **.docx** (styles, lists, tables, images, comments, TOC with page numbers, page setup, headers/footers), **PDF** (vector, via the print dialog), **HTML**, **Markdown**, **plain text**. Import **.docx** with formatting preserved — fonts, sizes, colours, alignment, spacing, lists, merged table cells, images, links, page setup, headers/footers, threaded comments, footnotes — plus **.md**, **.html**, **.txt**, **.rtf**. Or just drop a file on the window; paste from Word keeps lists |
+| **Review** | Comments with replies, resolve and delete, exported as native Word comments; version history with restore; backup/restore of all documents |
 | **Storage** | Auto-save to IndexedDB, document list with search, rename, duplicate and delete; multi-tab change detection; documents from LibreWord v1 are migrated automatically |
 | **PWA** | Installable, works fully offline after the first visit, and registers as a handler for `.docx`/`.md`/`.txt`/`.html` files |
 
@@ -81,15 +82,18 @@ src/
     word-commands.js       Change case, grow/shrink font, Word shortcuts
     page-setup.js          Paper sizes, margins, units
   io/
-    docx.js                Native .docx writer (styles, numbering, tables, images)
-    import.js              .docx / .md / .html / .txt / .rtf import, HTML sanitizing
+    docx.js                Native .docx writer (styles, numbering, tables, images, comments)
+    docx-import.js         Native .docx reader (OOXML → LibreWord HTML, settings, comments)
+    paste.js               Clean-up of HTML pasted from Word
+    import.js              .md / .html / .txt / .rtf import, HTML sanitizing
     markdown.js, export.js Markdown, HTML, text and print/PDF export
   storage/db.js            IndexedDB (metadata + content stores, v1 migration)
   ui/                      Ribbon, start screen, backstage, dialogs, panels, ruler
   styles/                  App chrome and document styles
 tests/
-  unit/                    Vitest
+  unit/                    Vitest (converters, Word fixture files, search, parsing)
   e2e/                     Playwright smoke tests and benchmark
+  fixtures/word/           Word-authored sample documents (from mammoth.js, BSD-2)
 ```
 
 The previous Quill/Express implementation lives in `client/` and `server/`; it is no longer used by the build and can be deleted.

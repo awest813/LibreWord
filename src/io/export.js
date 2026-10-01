@@ -55,7 +55,16 @@ export async function exportDocument(editor, format, { title, settings, comments
   switch (format) {
     case 'docx': {
       const { docxBlob } = await import('./docx.js');
-      const blob = await docxBlob(editor.getJSON(), settings, { title, comments });
+      const headings = collectHeadings(editor.state.doc);
+      const pageOf = editor.extensionManager.extensions.find((e) => e.name === 'tableOfContents')?.options.getPageOf;
+      const tocPages = headings.map((h) => {
+        try {
+          return pageOf?.(h.pos) ?? null;
+        } catch {
+          return null;
+        }
+      });
+      const blob = await docxBlob(editor.getJSON(), settings, { title, comments, tocPages });
       downloadBlob(blob, `${name}.docx`);
       return;
     }

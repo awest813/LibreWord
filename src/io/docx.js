@@ -282,7 +282,11 @@ class Converter {
       case 'pageBreak':
         return [new Paragraph({ children: [new PageBreak()] })];
       case 'tableOfContents':
-        return [new TableOfContents('Contents', { hyperlink: true, headingStyleRange: '1-3' })];
+        // Cached entries make the TOC visible in every viewer; Word refreshes it on demand.
+        return [
+          new Paragraph({ style: 'TOCHeading', children: [new TextRun('Contents')] }),
+          new TableOfContents('Contents', { hyperlink: true, headingStyleRange: '1-3', cachedEntries: this.tocEntries }),
+        ];
       case 'bulletList':
       case 'orderedList':
       case 'taskList': {
@@ -356,13 +360,21 @@ const ORDERED_FORMATS = [LevelFormat.DECIMAL, LevelFormat.LOWER_LETTER, LevelFor
 
 function headerFooter(text, pageNumbers, isFooter) {
   const children = [];
-  if (text) children.push(new TextRun({ text, color: '595959', size: 18 }));
+  const style = { color: '595959', size: 18 };
+  if (text) children.push(new TextRun({ text, ...style }));
   if (isFooter && pageNumbers) {
-    if (text) children.push(new TextRun({ text: '   ' }));
-    children.push(new TextRun({ children: ['Page ', PageNumber.CURRENT, ' of ', PageNumber.TOTAL_PAGES], color: '595959', size: 18 }));
+    // One run per piece so the field results get the same formatting as the text.
+    if (text) children.push(new TextRun({ text: '   ', ...style }));
+    children.push(
+      new TextRun({ text: 'Page ', ...style }),
+      new TextRun({ children: [PageNumber.CURRENT], ...style }),
+      new TextRun({ text: ' of ', ...style }),
+      new TextRun({ children: [PageNumber.TOTAL_PAGES], ...style }),
+    );
   }
   if (!children.length) return undefined;
-  const p = new Paragraph({ alignment: isFooter ? AlignmentType.CENTER : AlignmentType.RIGHT, children });
+  // The Header/Footer paragraph style carries the font so page-number field results match.
+  const p = new Paragraph({ style: isFooter ? 'Footer' : 'Header', alignment: isFooter ? AlignmentType.CENTER : AlignmentType.RIGHT, children });
   return isFooter ? new Footer({ children: [p] }) : new Header({ children: [p] });
 }
 
@@ -388,13 +400,36 @@ function buildComments(json, comments = {}) {
   return { anchors, options: children.length ? { children } : undefined };
 }
 
-export async function buildDocx(json, settings, { title = 'Document', author = 'LibreWord', comments = {} } = {}) {
+function tocEntries(json, pages = []) {
+  const entries = [];
+  const text = (n) => (n.content || []).map((c) => (c.type === 'text' ? c.text : text(c))).join('');
+  let i = 0;
+  const walk = (n) => {
+    if (n.type === 'heading') {
+      // Indexes line up with collectHeadings(), which skips empty headings.
+      const t = text(n).trim();
+      if (!t) return;
+      const page = pages[i++];
+      if ((n.attrs?.level || 1) <= 3) entries.push({ title: t, level: n.attrs?.level || 1, ...(page ? { page } : {}) });
+      return;
+    }
+    if (n.type !== 'table') (n.content || []).forEach(walk);
+  };
+  walk(json);
+  return entries;
+}
+
+/**
+ * @param tocPages page number of each heading in document order (from the
+ *   live layout), used for the table of contents' cached entries.
+ */
+export async function buildDocx(json, settings, { title = 'Document', author = 'LibreWord', comments = {}, tocPages = [] } = {}) {
   const geometry = pageGeometry(settings);
   const images = await collectImages(json);
   const commentData = buildComments(json, comments);
   const conv = new Converter(images, geometry, commentData.anchors);
+  conv.tocEntries = tocEntries(json, tocPages);
   const children = conv.blocks(json.content || []);
-  const hasToc = JSON.stringify(json).includes('"tableOfContents"');
   const landscape = settings.orientation === 'landscape';
   const heading = (size, color, before, extra = {}) => ({
     run: { font: 'Calibri Light', size, color, ...extra },
@@ -407,7 +442,6 @@ export async function buildDocx(json, settings, { title = 'Document', author = '
   return new Document({
     creator: author,
     title,
-    features: hasToc ? { updateFields: true } : undefined,
     comments: commentData.options,
     styles: {
       default: {
@@ -427,6 +461,12 @@ export async function buildDocx(json, settings, { title = 'Document', author = '
         { id: 'IntenseQuote', name: 'Intense Quote', basedOn: 'Normal', next: 'Normal', run: { italics: true, color: '2F5496' }, paragraph: { alignment: AlignmentType.CENTER, spacing: { before: 360, after: 360 }, indent: { left: 864, right: 864 }, border: { top: { style: BorderStyle.SINGLE, size: 4, color: '2F5496', space: 10 }, bottom: { style: BorderStyle.SINGLE, size: 4, color: '2F5496', space: 10 } } } },
         { id: 'Caption', name: 'Caption', basedOn: 'Normal', next: 'Normal', run: { italics: true, color: '44546A', size: 18 }, paragraph: { spacing: { after: 200, line: 240 } } },
         { id: 'NoSpacing', name: 'No Spacing', basedOn: 'Normal', next: 'NoSpacing', paragraph: { spacing: { after: 0, line: 240 } } },
+        { id: 'Header', name: 'header', basedOn: 'Normal', run: { color: '595959', size: 18 }, paragraph: { spacing: { after: 0, line: 240 } } },
+        { id: 'Footer', name: 'footer', basedOn: 'Normal', run: { color: '595959', size: 18 }, paragraph: { spacing: { after: 0, line: 240 } } },
+        { id: 'TOCHeading', name: 'TOC Heading', basedOn: 'Normal', next: 'Normal', run: { font: 'Calibri Light', size: 32, color: '2F5496' }, paragraph: { spacing: { before: 240, after: 120 } } },
+        { id: 'TOC1', name: 'toc 1', basedOn: 'Normal', next: 'Normal', paragraph: { spacing: { after: 100 } } },
+        { id: 'TOC2', name: 'toc 2', basedOn: 'Normal', next: 'Normal', paragraph: { spacing: { after: 100 }, indent: { left: 220 } } },
+        { id: 'TOC3', name: 'toc 3', basedOn: 'Normal', next: 'Normal', paragraph: { spacing: { after: 100 }, indent: { left: 440 } } },
       ],
     },
     numbering: {
