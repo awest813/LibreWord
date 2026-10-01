@@ -1,119 +1,107 @@
 ![License: MIT](https://img.shields.io/badge/license-MIT-blueviolet.svg)
-![Node.js ≥ 14](https://img.shields.io/badge/node-%E2%89%A514-brightgreen.svg)
-![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)
+![Static site](https://img.shields.io/badge/hosting-any%20static%20host-brightgreen.svg)
+![Offline](https://img.shields.io/badge/works-offline-blue.svg)
 
 # LibreWord
 
-> A modern, browser-based word processor built as a Progressive Web App (PWA).
+> A fast, offline-first word processor that runs entirely in your browser — no server, no account, your documents stay on your device.
 
-LibreWord runs entirely in the browser, persists documents locally with IndexedDB for full offline access, and can be installed to your desktop or home screen like a native app — no account or cloud subscription required.
-
-🌍 **Repository:** <https://github.com/awest813/LibreWord>
+LibreWord looks and works like a desktop word processor: a ribbon, real pages with margins, headers and footers, styles, tables, a table of contents and `.docx` export that opens cleanly in Microsoft Word, Google Docs, LibreOffice and Pages. The whole app is a static site — build it once and host the `dist/` folder anywhere.
 
 ---
 
 ## Features
 
-| Category | What's included |
+| Area | What you get |
 |---|---|
-| **Editing** | Rich text editing powered by [Quill 2.x](https://quilljs.com/); full menu bar (File, Edit, Insert, Format, View, Help) with keyboard shortcuts |
-| **Find & Replace** | In-document search with match highlighting |
-| **Export** | PDF, Word (.doc), HTML, and Plain Text |
-| **Import** | `.docx`, `.txt`, `.md`, and `.html` files via [Mammoth.js](https://github.com/mwilliamson/mammoth.js) |
-| **Tables** | Visual grid picker for fast table insertion |
-| **Dashboard** | Document list with full-text search, date sorting, and per-card content preview |
-| **Auto-save** | Debounced save to IndexedDB (1 s after last keystroke) |
-| **PWA** | Installable to desktop/home screen; works fully offline after first load |
-| **Layout** | Zoom (50 %–200 %), Portrait/Landscape orientation, Print Layout / Web Layout, cm ruler |
-| **UX extras** | Online/Offline status indicator, keyboard shortcut reference dialog |
+| **Pages** | True print layout: text, list items and table rows flow across Letter, Legal, A4, A5 or Executive pages with Word's margin presets, portrait/landscape, hard page breaks, headers, footers and page numbers |
+| **Ribbon** | Home, Insert, Layout, References, Review, View and a contextual **Table** tab, plus a **File** backstage (New, Open, Info, Save a Copy, Print) |
+| **Text** | Font family & size, grow/shrink, bold/italic/underline/strike, sub/superscript, font color, highlighter, change case, clear formatting, format painter |
+| **Paragraphs** | Styles gallery (Normal, No Spacing, Title, Subtitle, Heading 1–6, Quote, Intense Quote, Caption), alignment, line & paragraph spacing, indents, first-line/hanging indents, bullets, numbering, checklists |
+| **Insert** | Tables (grid picker, merge/split, header rows, shading, resizable columns), pictures (file, paste, drag & drop, URL; resizable), links, symbols, date & time, horizontal lines, code blocks, live **table of contents** with page numbers |
+| **Review & navigation** | Find & replace (match case, whole word, regex), navigation pane (outline + search results), word count, browser spell check, read aloud, go to page |
+| **View** | Print/Web layout, ruler with draggable margins and indent, zoom 10–500 % (Ctrl + wheel, one page, page width), formatting marks, focus mode, dark mode, full screen |
+| **Files** | Export **.docx** (styles, lists, tables, images, comments, TOC with page numbers, page setup, headers/footers), **PDF** (vector, via the print dialog), **HTML**, **Markdown**, **plain text**. Import **.docx** with formatting preserved — fonts, sizes, colours, alignment, spacing, lists, merged table cells, images, links, page setup, headers/footers, threaded comments, footnotes — plus **.md**, **.html**, **.txt**, **.rtf**. Or just drop a file on the window; paste from Word keeps lists |
+| **Review** | Comments with replies, resolve and delete, exported as native Word comments; version history with restore; backup/restore of all documents |
+| **Storage** | Auto-save to IndexedDB, document list with search, rename, duplicate and delete; multi-tab change detection; documents from LibreWord v1 are migrated automatically |
+| **PWA** | Installable, works fully offline after the first visit, and registers as a handler for `.docx`/`.md`/`.txt`/`.html` files |
 
----
+Keyboard shortcuts follow Word (Ctrl+B/I/U, Ctrl+L/E/R/J, Ctrl+Enter, Ctrl+K, Ctrl+]/[, Shift+F3, Ctrl+Alt+1…6, Ctrl+F/H, Ctrl+S, Ctrl+P…). Press **Ctrl+/** in the editor for the full list.
 
-## Screenshots
+## Performance
 
-![LibreWord in use — demo](./Assets/00-demo.gif)
+Pagination is incremental: after an edit LibreWord re-measures only from the changed block and stops as soon as the layout converges with the previous pass. On a 100-page document (`npm run bench`):
 
-<details>
-<summary>More screenshots</summary>
+| | |
+|---|---|
+| Load + full pagination | ~220 ms |
+| Pagination work per keystroke | ~0.3 ms |
+| Total transaction cost per keystroke | ~3 ms |
 
-**manifest.json**
-![manifest.json in browser DevTools](./Assets/01-manifest.png)
+Heavy code is loaded on demand: the `.docx` writer, `.docx` reader, Markdown parser and dialogs are separate chunks fetched only when used.
 
-**Service Worker**
-![Registered service worker in browser DevTools](./Assets/02-service-worker.png)
+## Getting started
 
-**IndexedDB Storage**
-![IndexedDB storage named 'libreword' in browser DevTools](./Assets/03-idb-storage.png)
-
-</details>
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- [Node.js](https://nodejs.org/) ≥ 14
-
-### Install & run
+Requires Node.js 20+.
 
 ```bash
-# 1. Install all dependencies (root, client, and server)
-npm run install:all
-
-# 2a. Development mode — Express + webpack-dev-server with HMR
-npm run start:dev
-
-# 2b. Production mode — build then serve
-npm start
+npm install
+npm run dev        # development server with hot reload
+npm run build      # production build in dist/
+npm run preview    # serve the production build locally
 ```
 
-The app will be available at `http://localhost:3000` (or the port printed in your terminal).
+### Deploying
 
----
+`dist/` is plain static files with relative URLs, so it works from any host or sub-path — GitHub Pages, Netlify, Cloudflare Pages, S3, `python -m http.server`, or a USB stick.
 
-## Tech Stack
+The included workflow (`.github/workflows/deploy.yml`) runs the tests and publishes to **GitHub Pages** on every push to `main`. Enable it under *Settings → Pages → Build and deployment → Source: GitHub Actions*.
 
-| Layer | Technology |
-|---|---|
-| Editor | [Quill 2.x](https://quilljs.com/) |
-| Offline storage | IndexedDB via [idb](https://github.com/jakearchibald/idb) |
-| PWA / Service Worker | [Workbox 7](https://developer.chrome.com/docs/workbox/) via workbox-webpack-plugin |
-| Bundler | [Webpack 5](https://webpack.js.org/) + Babel |
-| Server | [Express](https://expressjs.com/) |
-| Export | [html2pdf.js](https://github.com/eKoopmans/html2pdf.js), [FileSaver.js](https://github.com/eligrey/FileSaver.js) |
-| Import | [Mammoth.js](https://github.com/mwilliamson/mammoth.js) |
+## Testing
 
----
-
-## Project Structure
-
-```
-LibreWord/
-├── client/
-│   ├── src/
-│   │   ├── js/
-│   │   │   ├── index.js      # App bootstrap, dashboard, router
-│   │   │   ├── editor.js     # Quill wrapper, toolbar, menus, export/import
-│   │   │   ├── database.js   # IndexedDB CRUD via idb
-│   │   │   ├── install.js    # PWA install prompt handler
-│   │   │   └── header.js     # ASCII header / banner
-│   │   └── css/style.css
-│   ├── src-sw.js             # Custom service worker (Workbox)
-│   ├── index.html
-│   └── webpack.config.js
-└── server/
-    ├── server.js             # Express static file server
-    └── routes/htmlRoutes.js
+```bash
+npm test                         # unit tests (Vitest): converters, search, parsing
+npm run build && npm run test:e2e   # end-to-end tests in headless Chromium
+npm run build && npm run bench      # editing benchmark on a large document
+npm run build && npm run test:a11y   # axe-core accessibility audit of every screen
 ```
 
----
+The end-to-end suite drives the real app: typing and formatting, the ribbon, undo/redo, pagination invariants (every rendered line must fall inside a page's content area, before and after edits), find & replace, persistence across reloads, `.docx` and Markdown export (the `.docx` is parsed back to verify it), Markdown import and page setup. It uses `playwright-core`; set `CHROME_PATH` to point at a Chromium binary, or run `npx playwright-core install chromium` first.
 
-## Contributing
+## Project structure
 
-Pull requests are welcome! Please open an issue first to discuss what you'd like to change.
+```
+index.html                 App shell
+src/
+  main.js                  Router (#/ start screen, #/doc/:id editor), file drop, PWA
+  editor/
+    create-editor.js       TipTap/ProseMirror schema and extensions
+    pagination.js          Page layout engine (spacer decorations, incremental)
+    paragraph-format.js    Line/paragraph spacing, indents, named paragraph styles
+    page-break.js, toc.js  Page break node, live table of contents
+    search.js              Find & replace with highlighting
+    word-commands.js       Change case, grow/shrink font, Word shortcuts
+    page-setup.js          Paper sizes, margins, units
+  io/
+    docx.js                Native .docx writer (styles, numbering, tables, images, comments)
+    docx-import.js         Native .docx reader (OOXML → LibreWord HTML, settings, comments)
+    paste.js               Clean-up of HTML pasted from Word
+    import.js              .md / .html / .txt / .rtf import, HTML sanitizing
+    markdown.js, export.js Markdown, HTML, text and print/PDF export
+  storage/db.js            IndexedDB (metadata + content stores, v1 migration)
+  ui/                      Ribbon, start screen, backstage, dialogs, panels, ruler
+  styles/                  App chrome and document styles
+tests/
+  unit/                    Vitest (converters, Word fixture files, search, parsing)
+  e2e/                     Playwright smoke tests and benchmark
+  fixtures/word/           Word-authored sample documents (from mammoth.js, BSD-2)
+```
 
----
+The previous Quill/Express implementation lives in `client/` and `server/`; it is no longer used by the build and can be deleted.
+
+## Privacy
+
+Documents never leave your browser unless you export them. There is no backend, no analytics and no account.
 
 ## License
 

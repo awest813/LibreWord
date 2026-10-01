@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="LibreWord — a fast, offline-first word processor that runs entirely in your browser. No account, no server, your documents stay on your device." />
+    <meta name="theme-color" content="#185abd" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+    <title>LibreWord</title>
+    <script>
+      // Apply the saved theme before first paint to avoid a flash.
+      try {
+        var t = localStorage.getItem('lw:theme');
+        if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="app" aria-busy="true">
+      <div class="boot-splash" role="status">
+        <svg width="56" height="56" viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="10" fill="#185abd"/><path d="M12 14h4.2l3.3 14.4L23.2 14h3.6l3.7 14.4L33.8 14H38l-5.6 20h-3.9L25 20.6 21.5 34h-3.9z" fill="#fff"/></svg>
+        <span>LibreWord</span>
+      </div>
+    </div>
+    <noscript>LibreWord needs JavaScript to run.</noscript>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

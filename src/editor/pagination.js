@@ -1,0 +1,453 @@
+import { Extension } from '@tiptap/core';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
+
+/**
+ * Word-style pagination for a single ProseMirror document.
+ *
+ * The document is laid out as one continuous column the width of a page.
+ * After every layout change we measure where each block *would* sit without
+ * any page spacing (its "natural" position), then insert spacer widgets so
+ * that nothing straddles a page boundary:
+ *   - blocks that would cross the bottom margin are pushed to the next page;
+ *   - paragraphs taller than the remaining space are split between lines;
+ *   - lists, quotes and tables are split between items / rows;
+ *   - explicit page breaks push the following block to a new page.
+ *
+ * Natural positions are recovered by subtracting the spacers that are
+ * currently rendered, so a layout pass never needs to remove decorations
+ * first and the result converges in a single pass.
+ */
+
+export const paginationKey = new PluginKey('pagination');
+
+const EPS = 0.75;
+const SPLITTABLE = new Set(['bulletList', 'orderedList', 'taskList', 'listItem', 'taskItem', 'blockquote', 'table']);
+
+function buildDecorations(doc, spacers) {
+  if (!spacers.length) return DecorationSet.empty;
+  const decos = spacers.map((s) =>
+    Decoration.widget(
+      s.pos,
+      () => {
+        const el = document.createElement(s.inline ? 'span' : 'div');
+        el.className = s.inline ? 'pm-page-spacer pm-page-spacer-inline' : 'pm-page-spacer';
+        el.style.height = `${s.height}px`;
+        el.setAttribute('contenteditable', 'false');
+        el.setAttribute('aria-hidden', 'true');
+        return el;
+      },
+      { side: -1, ignoreSelection: true, marks: [], key: `pg:${s.pos}:${s.inline ? 'i' : 'b'}:${s.height.toFixed(1)}` },
+    ),
+  );
+  return DecorationSet.create(doc, decos);
+}
+
+function sameSpacers(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].pos !== b[i].pos || a[i].inline !== b[i].inline || Math.abs(a[i].height - b[i].height) > 0.5) return false;
+  }
+  return true;
+}
+
+/**
+ * Compute spacer positions for the current DOM. Pure measurement — no DOM writes.
+ *
+ * With `dirty` ({ from, to } in document positions) only blocks from the
+ * edited region onward are measured, and the pass stops as soon as a block
+ * after the edit lands exactly where it did before — at that point every
+ * later spacer is unchanged and is reused as-is. Typing therefore costs a
+ * couple of block measurements regardless of document length.
+ */
+export function computeLayout(view, geometry, oldSpacers, { dirty = null, prevPageCount = 1, prevTops = null } = {}) {
+  const root = view.dom;
+  const rootRect = root.getBoundingClientRect();
+  const scale = rootRect.width / geometry.width || 1;
+  const toY = (clientY) => (clientY - rootRect.top) / scale;
+
+  const { height: H, gap, margins } = geometry;
+  const P = H + gap;
+  const contentTop = (k) => k * P + margins.top;
+  const contentBottom = (k) => k * P + H - margins.bottom;
+  const contentHeight = H - margins.top - margins.bottom;
+  const pageOf = (y) => Math.max(0, Math.floor((y + EPS) / P));
+
+  // Prefix sums of the spacers currently in the DOM, for natural positions.
+  const oldPos = oldSpacers.map((s) => s.pos);
+  const oldSum = [0];
+  for (const s of oldSpacers) oldSum.push(oldSum[oldSum.length - 1] + s.height);
+  const oldBefore = (pos) => {
+    let lo = 0;
+    let hi = oldPos.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (oldPos[mid] <= pos) lo = mid + 1;
+      else hi = mid;
+    }
+    return oldSum[lo];
+  };
+
+  const spacers = [];
+  let shift = 0;
+  let breakAfterPage = -1;
+  let maxBottom = margins.top;
+
+  const addSpacer = (pos, height, inline = false) => {
+    if (height <= EPS) return;
+    const last = spacers[spacers.length - 1];
+    if (last && last.pos === pos && last.inline === inline) last.height += height;
+    else spacers.push({ pos, height, inline });
+    shift += height;
+  };
+
+  const caret = (pos) => {
+    try {
+      return view.coordsAtPos(pos, 1);
+    } catch {
+      return null;
+    }
+  };
+  const lineBottomAt = (pos) => {
+    const c = caret(pos);
+    return c ? toY(c.bottom) - oldBefore(pos) + shift : -Infinity;
+  };
+  const lineTopAt = (pos) => {
+    const c = caret(pos);
+    return c ? toY(c.top) - oldBefore(pos) + shift : -Infinity;
+  };
+
+  // First position in [from, to] whose line extends below `limit`, or -1.
+  const firstPosBelow = (from, to, limit) => {
+    if (lineBottomAt(to) <= limit + EPS) return -1;
+    let lo = from;
+    let hi = to;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (lineBottomAt(mid) > limit + EPS) hi = mid;
+      else lo = mid + 1;
+    }
+    return lo;
+  };
+
+  const splitTextblock = (node, pos, anchor, top, height, k) => {
+    const start = pos + 1;
+    const end = pos + node.nodeSize - 1;
+    let bottom = top + height;
+    let from = start;
+    let page = k;
+    for (let guard = 0; guard < 500 && bottom > contentBottom(page) + EPS; guard++) {
+      const q = firstPosBelow(from, end, contentBottom(page));
+      if (q < 0) break;
+      const lineTop = lineTopAt(q);
+      // Orphan control: never leave just the first line at the bottom of a page.
+      const firstLineBottom = lineBottomAt(start);
+      const onlyFirstLineFits = from === start && lineTop <= firstLineBottom + EPS;
+      if (q <= start || onlyFirstLineFits) {
+        if (from === start && top > contentTop(page) + EPS) {
+          const s = contentTop(page + 1) - top;
+          addSpacer(anchor, s);
+          top += s;
+          bottom += s;
+          page += 1;
+          continue;
+        }
+        if (q <= from) break; // a single line taller than the page — let it overflow
+      }
+      const s = contentTop(page + 1) - lineTop;
+      if (s <= EPS) break;
+      addSpacer(q, s, true);
+      bottom += s;
+      page += 1;
+      from = q + 1;
+    }
+    return bottom;
+  };
+
+  const layoutNode = (node, pos, anchor) => {
+    const dom = view.nodeDOM(pos);
+    if (!dom || dom.nodeType !== 1) return;
+    const rect = dom.getBoundingClientRect();
+    const end = pos + node.nodeSize;
+    let top = toY(rect.top) - oldBefore(pos) + shift;
+    const height = rect.height / scale - (oldBefore(end - 1) - oldBefore(pos));
+
+    if (node.type.name === 'pageBreak') {
+      breakAfterPage = pageOf(top);
+      return;
+    }
+
+    if (breakAfterPage >= 0) {
+      const target = contentTop(breakAfterPage + 1);
+      if (top < target - EPS) {
+        addSpacer(anchor, target - top);
+        top = target;
+      }
+      breakAfterPage = -1;
+    }
+
+    let k = pageOf(top);
+    if (top > contentBottom(k) - EPS) {
+      // Starts inside the bottom margin / page gap: move to the next page.
+      const s = contentTop(k + 1) - top;
+      addSpacer(anchor, s);
+      top += s;
+      k += 1;
+    }
+
+    let bottom = top + height;
+    if (bottom > contentBottom(k) + EPS) {
+      if (SPLITTABLE.has(node.type.name) && node.childCount > 0) {
+        layoutChildren(node, pos + 1, anchor);
+        return;
+      }
+      if (node.isTextblock && node.content.size > 0) {
+        bottom = splitTextblock(node, pos, anchor, top, height, k);
+      } else if (top > contentTop(k) + EPS && height <= contentHeight + EPS) {
+        const s = contentTop(k + 1) - top;
+        addSpacer(anchor, s);
+        bottom += s;
+      }
+    }
+    if (bottom > maxBottom) maxBottom = bottom;
+  };
+
+  const layoutChildren = (parent, contentStart, firstAnchor) => {
+    let index = 0;
+    parent.forEach((child, offset) => {
+      const pos = contentStart + offset;
+      layoutNode(child, pos, index === 0 && firstAnchor != null ? firstAnchor : pos);
+      index += 1;
+    });
+  };
+
+  const doc = view.state.doc;
+  const offsets = [];
+  doc.forEach((_child, offset) => offsets.push(offset));
+
+  let startIndex = 0;
+  if (dirty) {
+    while (startIndex < offsets.length - 1 && offsets[startIndex] + doc.child(startIndex).nodeSize <= dirty.from) startIndex++;
+    startIndex = Math.max(0, startIndex - 1);
+    // A page break affects the block after it, so never start right after one.
+    while (startIndex > 0 && doc.child(startIndex - 1).type.name === 'pageBreak') startIndex--;
+    const startPos = offsets[startIndex] ?? 0;
+    for (const s of oldSpacers) {
+      if (s.pos >= startPos) break;
+      spacers.push({ ...s });
+      shift += s.height;
+    }
+  }
+
+  // Where each top-level block started (before its own spacer) in this pass,
+  // keyed by node identity: unchanged blocks keep the same node object.
+  const tops = new Map();
+  if (dirty && prevTops) {
+    for (let i = 0; i < startIndex; i++) {
+      const n = doc.child(i);
+      if (prevTops.has(n)) tops.set(n, prevTops.get(n));
+    }
+  }
+
+  let converged = false;
+  for (let i = startIndex; i < offsets.length; i++) {
+    const pos = offsets[i];
+    const node = doc.child(i);
+    const dom = view.nodeDOM(pos);
+    const topBefore = dom && dom.nodeType === 1 ? toY(dom.getBoundingClientRect().top) - oldBefore(pos) + shift : null;
+    // Converged: an untouched block starts exactly where it did last pass, so
+    // it and everything after it will be laid out identically.
+    if (
+      dirty && prevTops && topBefore != null && i > startIndex && pos >= dirty.to && breakAfterPage < 0 &&
+      prevTops.has(node) && Math.abs(prevTops.get(node) - topBefore) < 0.5
+    ) {
+      for (const s of oldSpacers) if (s.pos >= pos) spacers.push({ ...s });
+      for (let j = i; j < offsets.length; j++) {
+        const n = doc.child(j);
+        if (prevTops.has(n)) tops.set(n, prevTops.get(n));
+      }
+      converged = true;
+      break;
+    }
+    if (topBefore != null) {
+      // The same node object can appear twice (e.g. pasted twice); never trust those.
+      if (tops.has(node)) tops.set(node, NaN);
+      else tops.set(node, topBefore);
+    }
+    layoutNode(node, pos, pos);
+  }
+
+  // A trailing page break starts a fresh (empty) page.
+  if (breakAfterPage >= 0) maxBottom = Math.max(maxBottom, contentTop(breakAfterPage + 1));
+
+  spacers.sort((a, b) => a.pos - b.pos || (a.inline ? 1 : -1));
+  const pageCount = converged ? prevPageCount : Math.max(1, pageOf(maxBottom - EPS * 2) + 1);
+  return { spacers, pageCount, scale, tops };
+}
+
+/** Union of the document ranges a transaction touched (in post-transaction positions). */
+export function mergeDirty(prev, tr) {
+  if (prev === 'all') return 'all';
+  let from = Infinity;
+  let to = -Infinity;
+  const maps = tr.mapping.maps;
+  const mapThrough = (pos, i, assoc) => {
+    let p = pos;
+    for (let k = i + 1; k < maps.length; k++) p = maps[k].map(p, assoc);
+    return p;
+  };
+  tr.steps.forEach((step, i) => {
+    let touched = false;
+    maps[i].forEach((_os, _oe, ns, ne) => {
+      touched = true;
+      from = Math.min(from, mapThrough(ns, i, -1));
+      to = Math.max(to, mapThrough(ne, i, 1));
+    });
+    if (!touched) {
+      // Mark and attribute steps don't move positions but can change heights.
+      const a = step.from ?? step.pos;
+      const b = step.to ?? (step.pos != null ? step.pos + 1 : undefined);
+      if (a == null || b == null) {
+        from = -1;
+        return;
+      }
+      from = Math.min(from, mapThrough(a, i, -1));
+      to = Math.max(to, mapThrough(b, i, 1));
+    }
+  });
+  if (from === -1) return 'all';
+  if (prev) {
+    from = Math.min(from, tr.mapping.map(prev.from, -1));
+    to = Math.max(to, tr.mapping.map(prev.to, 1));
+  }
+  if (from === Infinity) return prev;
+  return { from: Math.max(0, from), to };
+}
+
+export const Pagination = Extension.create({
+  name: 'pagination',
+
+  addOptions() {
+    return {
+      /** () => geometry from pageGeometry(), or null to disable pagination */
+      getGeometry: () => null,
+      /** Called with { pageCount } after every layout pass. */
+      onLayout: () => {},
+    };
+  },
+
+  addStorage() {
+    return { pageCount: 1 };
+  },
+
+  addCommands() {
+    return {
+      repaginate: () => ({ editor }) => {
+        editor.storage.pagination.schedule?.();
+        return true;
+      },
+    };
+  },
+
+  addProseMirrorPlugins() {
+    const ext = this;
+    return [
+      new Plugin({
+        key: paginationKey,
+        state: {
+          init: () => ({ spacers: [], decorations: DecorationSet.empty, dirty: null }),
+          apply(tr, prev, _old, newState) {
+            const meta = tr.getMeta(paginationKey);
+            if (meta) {
+              if (!meta.spacers) return { ...prev, dirty: null };
+              return { spacers: meta.spacers, decorations: buildDecorations(newState.doc, meta.spacers), dirty: null };
+            }
+            if (!tr.docChanged) return prev;
+            const spacers = [];
+            for (const s of prev.spacers) {
+              const r = tr.mapping.mapResult(s.pos, -1);
+              if (!r.deleted) spacers.push({ ...s, pos: r.pos });
+            }
+            return {
+              spacers,
+              decorations: prev.spacers.length ? prev.decorations.map(tr.mapping, tr.doc) : prev.decorations,
+              dirty: mergeDirty(prev.dirty, tr),
+            };
+          },
+        },
+        props: {
+          decorations(state) {
+            return paginationKey.getState(state).decorations;
+          },
+        },
+        view(view) {
+          let frame = 0;
+          let destroyed = false;
+          let full = true;
+
+          const run = () => {
+            frame = 0;
+            if (destroyed || !view.dom.isConnected) return;
+            if (view.composing) {
+              schedule();
+              return;
+            }
+            const geometry = ext.options.getGeometry();
+            const current = paginationKey.getState(view.state);
+            if (!geometry) {
+              full = true; // re-enabling pagination needs a complete pass
+              if (current.spacers.length || current.dirty) view.dispatch(view.state.tr.setMeta(paginationKey, { spacers: [] }));
+              ext.storage.pageCount = 1;
+              ext.options.onLayout({ pageCount: 1 });
+              return;
+            }
+            if (!full && !current.dirty) return;
+            const dirty = full || current.dirty === 'all' ? null : current.dirty;
+            full = false;
+            const t0 = performance.now();
+            const { spacers, pageCount, tops } = computeLayout(view, geometry, current.spacers, {
+              dirty,
+              prevPageCount: ext.storage.pageCount,
+              prevTops: ext.storage.tops,
+            });
+            ext.storage.tops = tops;
+            ext.storage.lastLayoutMs = performance.now() - t0;
+            const tr = view.state.tr.setMeta('addToHistory', false);
+            view.dispatch(tr.setMeta(paginationKey, sameSpacers(spacers, current.spacers) ? { spacers: null } : { spacers }));
+            ext.storage.pageCount = pageCount;
+            ext.options.onLayout({ pageCount });
+          };
+
+          const schedule = (forceFull = false) => {
+            if (forceFull === true) full = true;
+            if (!frame && !destroyed) frame = requestAnimationFrame(run);
+          };
+          const scheduleFull = () => schedule(true);
+          ext.storage.schedule = scheduleFull;
+
+          // Content can change height without a transaction (images loading,
+          // web fonts swapping in, window resizes) — watch for that too.
+          const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(scheduleFull) : null;
+          ro?.observe(view.dom);
+          document.fonts?.addEventListener?.('loadingdone', scheduleFull);
+          view.dom.addEventListener('load', scheduleFull, true);
+
+          scheduleFull();
+          return {
+            update(_view, prevState) {
+              if (prevState.doc !== view.state.doc) schedule();
+            },
+            destroy() {
+              destroyed = true;
+              if (frame) cancelAnimationFrame(frame);
+              ro?.disconnect();
+              document.fonts?.removeEventListener?.('loadingdone', scheduleFull);
+              view.dom.removeEventListener('load', scheduleFull, true);
+              ext.storage.schedule = null;
+            },
+          };
+        },
+      }),
+    ];
+  },
+});
