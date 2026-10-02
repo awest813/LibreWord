@@ -1,7 +1,8 @@
 import './styles/app.css';
-import { createDoc } from './storage/db.js';
+import { createDoc, findDocByFile, saveDoc, getDoc, addVersion } from './storage/db.js';
 import { importFile } from './io/import.js';
-import { renderStartScreen, pickFile } from './ui/start.js';
+import { pickFileToOpen, formatOfName, handleFromDataTransfer } from './io/file-access.js';
+import { renderStartScreen } from './ui/start.js';
 import { toast, h } from './ui/dom.js';
 import { toggleTheme } from './ui/theme.js';
 
@@ -20,12 +21,41 @@ async function newFromTemplate(t) {
   go(`#/doc/${id}`);
 }
 
-async function importAndOpen(file) {
+/**
+ * Open a file from the device. With a file handle (Chromium), the document
+ * stays linked to the file so Save writes back to it.
+ */
+async function importAndOpen(file, handle = null) {
   try {
+    const format = handle ? formatOfName(file.name) : null;
+    const existing = handle && format ? await findDocByFile(handle) : null;
+    if (existing && Math.abs((existing.file.lastModified || 0) - file.lastModified) < 1000) {
+      // Re-opening a file we already have, unchanged on disk: reuse that
+      // document (it keeps comments, history and anything the file format
+      // can't store, plus any edits not yet saved to the file).
+      go(`#/doc/${existing.id}`);
+      return;
+    }
     const { title, html, settings, comments } = await importFile(file);
-    const id = await createDoc({ title, html, settings: settings || {}, comments: comments || {} });
+    const link = handle && format ? { handle, name: file.name, format, lastModified: file.lastModified, unsaved: false } : null;
+    if (existing && !existing.file.unsaved) {
+      // The file changed on disk and we have nothing newer: refresh the same
+      // document from it (the previous state goes to version history).
+      const old = await getDoc(existing.id);
+      await addVersion(existing.id, { title: old.title, json: old.json, html: old.html, settings: old.settings, comments: old.comments, words: old.words, reason: 'before-reload' });
+      await saveDoc(existing.id, { html, settings: { ...old.settings, ...settings }, comments: comments || {}, file: link });
+      go(`#/doc/${existing.id}`);
+      toast(`Reloaded “${file.name}”, which changed on disk`, { type: 'success' });
+      return;
+    }
+    if (existing) {
+      // Both changed: keep our unsaved version as its own document, and link the file to a fresh import.
+      await saveDoc(existing.id, { file: null, title: `${existing.title} (unsaved changes)` });
+      toast(`“${file.name}” changed on disk. Your unsaved version was kept as “${existing.title} (unsaved changes)”.`, { timeout: 7000 });
+    }
+    const id = await createDoc({ title, html, settings: settings || {}, comments: comments || {}, file: link });
     go(`#/doc/${id}`);
-    toast(`Opened “${file.name}”`, { type: 'success' });
+    toast(link ? `Opened “${file.name}” — Save writes your changes back to it` : `Opened a copy of “${file.name}”`, { type: 'success', timeout: 4000 });
   } catch (err) {
     console.error(err);
     toast(err.message || 'Could not open that file.', { type: 'error', timeout: 6000 });
@@ -42,8 +72,8 @@ async function showStart() {
     onOpen: (id) => go(`#/doc/${id}`),
     onTemplate: newFromTemplate,
     onImport: async () => {
-      const f = await pickFile();
-      if (f) importAndOpen(f);
+      const picked = await pickFileToOpen();
+      if (picked) importAndOpen(picked.file, picked.handle);
     },
     onToggleTheme: toggleTheme,
   });
@@ -81,6 +111,11 @@ function route() {
     const m = /^#\/doc\/(.+)$/.exec(location.hash);
     const id = m ? decodeURIComponent(m[1]) : null;
     if (screen && screen.docId === id) return;
+    // Back button, links, launch handlers…: offer to save to the linked file first.
+    if (screen && !(await screen.confirmLeave())) {
+      location.hash = `#/doc/${encodeURIComponent(screen.docId)}`;
+      return;
+    }
     if (screen) {
       await screen.destroy();
       screen = null;
@@ -126,14 +161,16 @@ window.addEventListener('drop', (e) => {
   if (screen) return;
   e.preventDefault();
   const file = e.dataTransfer?.files?.[0];
-  if (file) importAndOpen(file);
+  // The handle must be requested synchronously, during the drop event.
+  const handlePromise = handleFromDataTransfer(e.dataTransfer);
+  if (file) handlePromise.then((handle) => importAndOpen(file, handle?.kind === 'file' ? handle : null));
 });
 
 // Files opened through the installed PWA's file handler ("Open with LibreWord").
 if ('launchQueue' in window) {
   window.launchQueue.setConsumer(async (params) => {
     for (const handle of params.files || []) {
-      importAndOpen(await handle.getFile());
+      importAndOpen(await handle.getFile(), handle);
     }
   });
 }

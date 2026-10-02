@@ -147,6 +147,18 @@ button { cursor: pointer; }
 }
 .doc-title-input:hover { border-color: rgba(255, 255, 255, 0.4); }
 .doc-title-input:focus { background: #fff; color: #201f1e; outline: none; border-color: #fff; text-align: left; }
+.file-chip {
+  display: inline-flex; align-items: center; gap: 6px; height: 26px; max-width: 360px; padding: 0 10px 0 8px; border-radius: 13px;
+  border: 1px solid rgba(255, 255, 255, 0.35); background: rgba(0, 0, 0, 0.14); color: #fff; font-size: 12px; white-space: nowrap;
+}
+.file-chip:hover { background: rgba(0, 0, 0, 0.26); }
+.file-chip .icon { width: 14px; height: 14px; flex: 0 0 auto; }
+.file-chip-name { overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.file-chip-state { opacity: 0.9; }
+.file-chip-state::before { content: '·'; margin-right: 6px; }
+.file-chip.is-dirty { background: #fff; color: #201f1e; border-color: #fff; }
+.file-chip.is-dirty .file-chip-state { color: #a4262c; opacity: 1; font-weight: 600; }
+.backstage-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
 .save-state { font-size: 12px; opacity: 0.85; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
 .titlebar-search {
   display: flex; align-items: center; gap: 6px; height: 32px; width: min(320px, 28vw); padding: 0 10px; border-radius: 4px;
@@ -606,7 +618,7 @@ kbd { font: 12px var(--font-ui); background: var(--surface-2); border: 1px solid
   .backstage-main { padding: 20px; }
 }
 @media (max-width: 600px) {
-  .save-state, .statusbar .sb-optional, .zoom-slider, .statusbar .icon-btn[aria-label='Focus'], .statusbar .icon-btn[aria-label^='Zoom'] { display: none; }
+  .file-chip-state, .save-state, .statusbar .sb-optional, .zoom-slider, .statusbar .icon-btn[aria-label='Focus'], .statusbar .icon-btn[aria-label^='Zoom'] { display: none; }
   .ribbon { min-height: 0; }
   .titlebar > .icon-btn[aria-label^='Save'] { display: none; }
   .canvas-inner { padding: 0 8px 32px; }

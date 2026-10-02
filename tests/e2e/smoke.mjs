@@ -19,6 +19,12 @@ const { base: BASE, stop } = await startPreview();
 const browser = await chromium.launch({ executablePath: CHROME });
 const context = await browser.newContext({ viewport: { width: 1400, height: 950 }, acceptDownloads: true });
 const page = await context.newPage();
+// This suite covers the file-input fallback used by Firefox and Safari; saving
+// back to files with the File System Access API is covered by files.mjs.
+await page.addInitScript(() => {
+  delete window.showOpenFilePicker;
+  delete window.showSaveFilePicker;
+});
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => {

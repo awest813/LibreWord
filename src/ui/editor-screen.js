@@ -3,8 +3,12 @@ import { createEditor } from '../editor/create-editor.js';
 import { KEEP_MARKS, countWords } from '../editor/word-commands.js';
 import { toggleTheme } from './theme.js';
 import { pageGeometry, PAGE_SIZES, PX_PER_IN, PX_PER_CM, PX_PER_PT, usesInches } from '../editor/page-setup.js';
-import { getDoc, saveDoc, addVersion, getVersion, createDoc } from '../storage/db.js';
-import { exportDocument, printCss, printDocument } from '../io/export.js';
+import { getDoc, saveDoc, addVersion, getVersion, createDoc, getDocFile } from '../storage/db.js';
+import { exportDocument, printCss, printDocument, renderDocumentBlob } from '../io/export.js';
+import {
+  FILE_FORMATS, LOSSY_NOTES, canSaveToFiles, ensureWritePermission, fileNameFor, formatOfName, handleFromDataTransfer,
+  pickSaveLocation, writeToHandle,
+} from '../io/file-access.js';
 import { sanitizeHtml } from '../io/import.js';
 import { transformPastedHTML } from '../io/paste.js';
 import { h, toast, debounce, isPopoverOpen, closePopover } from './dom.js';
@@ -13,7 +17,7 @@ import { Ribbon } from './ribbon.js';
 import { FindPanel, NavPane, Ruler } from './panels.js';
 import { CommentsPane, initialsOf } from './comments-pane.js';
 import { newId } from '../storage/db.js';
-import { openDialog, promptDialog } from './dialog.js';
+import { openDialog, promptDialog, confirmDialog } from './dialog.js';
 import { openBackstage } from './backstage.js';
 import { pickFile } from './start.js';
 
@@ -88,6 +92,11 @@ export class EditorScreen {
     this.createdAt = doc.createdAt;
     this.savedAt = doc.updatedAt;
     this.comments = doc.comments || {};
+    // Link to a file on the device (Chromium): Save writes back to it.
+    this.file = doc.file || null;
+    // Persisted, so "unsaved changes to the file" survives reloads and "Don't Save".
+    this.fileDirty = Boolean(doc.file?.unsaved);
+    this.fileRev = 0; // bumped by every change the file should get
     // The state the document was opened in: saved to version history the
     // first time this session changes it.
     this.openState = { title: doc.title, json: doc.json, html: doc.html, settings: doc.settings, comments: this.comments, words: doc.words, createdAt: doc.updatedAt };
@@ -114,7 +123,7 @@ export class EditorScreen {
         },
         handleDrop: (view, event) => {
           const pos = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
-          return this.handleFiles(event.dataTransfer?.files, pos);
+          return this.handleFiles(event.dataTransfer?.files, pos, event.dataTransfer);
         },
         handleClick: (view, pos, event) => {
           const a = event.target.closest?.('a[href]');
@@ -152,6 +161,7 @@ export class EditorScreen {
     this.applyGeometry();
     this.ruler.render();
     this.updateTitle();
+    this.renderFileChip();
     this.ribbon.update();
     this.updateStats();
     this.nav.render();
@@ -166,6 +176,16 @@ export class EditorScreen {
     const onKey = (e) => this.handleKeydown(e);
     document.addEventListener('keydown', onKey, true);
     this.cleanups.push(() => document.removeEventListener('keydown', onKey, true));
+
+    // Edits are always kept in the browser, but warn before leaving with
+    // changes that haven't been written to the linked file yet.
+    const onBeforeUnload = (e) => {
+      if (!this.fileDirty || this.leaveConfirmed) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    this.cleanups.push(() => window.removeEventListener('beforeunload', onBeforeUnload));
 
     const onHide = () => {
       if (document.visibilityState === 'hidden') this.flush();
@@ -234,6 +254,7 @@ export class EditorScreen {
     this.titleInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === 'Escape') {
         if (e.key === 'Escape') this.titleInput.value = this.title;
+        else this.commitTitle();
         e.preventDefault();
         this.editor.commands.focus();
       }
@@ -259,12 +280,12 @@ export class EditorScreen {
         title: 'Home — all documents',
         'aria-label': 'Home — all documents',
         html: '<svg width="26" height="26" viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="10" fill="#fff"/><path d="M12 14h4.2l3.3 14.4L23.2 14h3.6l3.7 14.4L33.8 14H38l-5.6 20h-3.9L25 20.6 21.5 34h-3.9z" fill="#185abd"/></svg>',
-        onclick: () => this.nav_.onHome(),
+        onclick: () => this.leaveDocument(() => this.nav_.onHome()),
       }),
-      btn('save', 'Save (Ctrl+S)', () => this.saveNow(true)),
+      (this.saveBtn = btn('save', 'Save (Ctrl+S)', () => this.save())),
       this.undoBtn,
       this.redoBtn,
-      h('div', { class: 'doc-title-wrap' }, this.titleInput, this.saveStateEl),
+      h('div', { class: 'doc-title-wrap' }, this.titleInput, this.saveStateEl, (this.fileChip = h('button', { type: 'button', class: 'file-chip', hidden: true, onclick: () => (this.fileDirty ? this.saveToFile() : this.openBackstage('info')) }))),
       h('label', { class: 'titlebar-search', html: icon('search') }, searchInput),
       h('div', { class: 'titlebar-right' }, btn('moon', 'Toggle dark mode', () => this.toggleTheme())),
     );
@@ -427,7 +448,10 @@ export class EditorScreen {
 
   onDocChange(transaction) {
     // Plugin housekeeping (e.g. the trailing paragraph) isn't a user edit.
-    if (!transaction?.getMeta('appendedTransaction')) this.userEdited = true;
+    if (!transaction?.getMeta('appendedTransaction')) {
+      this.userEdited = true;
+      this.markFileDirty();
+    }
     this.rev++;
     this.setSaveState('unsaved');
     this.queueSave();
@@ -478,7 +502,41 @@ export class EditorScreen {
     this.saveState = state;
     const labels = { saved: 'Saved', saving: 'Saving…', unsaved: 'Editing', error: 'Not saved' };
     this.saveStateEl.textContent = `· ${labels[state]}`;
-    this.saveStateEl.title = state === 'saved' ? 'All changes saved to this device' : '';
+    this.saveStateEl.title = state === 'saved' ? 'All changes saved in this browser' : '';
+    // With a linked file, the file's state is what matters; the chip shows it.
+    this.saveStateEl.hidden = Boolean(this.file) && state !== 'error';
+  }
+
+  renderFileChip() {
+    const chip = this.fileChip;
+    if (!chip) return;
+    chip.hidden = !this.file;
+    if (!this.file) return;
+    const name = this.file.name;
+    const state = this.fileSaving ? 'Saving…' : this.fileDirty ? 'Unsaved changes' : 'Saved';
+    chip.classList.toggle('is-dirty', this.fileDirty);
+    chip.innerHTML = `${icon('file')}<span class="file-chip-name"></span><span class="file-chip-state"></span>`;
+    chip.querySelector('.file-chip-name').textContent = name;
+    chip.querySelector('.file-chip-state').textContent = state;
+    chip.title = this.fileDirty
+      ? `Changes are kept in this browser but not yet in ${name}. Click or press ${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+S to save them to the file.`
+      : `Linked to ${name} on this device. Save writes your changes back to it.`;
+    chip.setAttribute('aria-label', `${name}: ${state}`);
+    this.saveStateEl.hidden = this.saveState !== 'error';
+  }
+
+  markFileDirty() {
+    if (!this.file) return;
+    this.fileRev++;
+    this.leaveConfirmed = false; // a new edit needs a new decision
+    if (this.fileDirty) return;
+    this.fileDirty = true;
+    this.renderFileChip();
+  }
+
+  /** The file link as stored with the document (undefined leaves the stored link alone). */
+  fileRecord() {
+    return this.file ? { ...this.file, unsaved: this.fileDirty } : undefined;
   }
 
   updateTitle() {
@@ -510,7 +568,7 @@ export class EditorScreen {
     const { state } = this.editor;
     const preview = state.doc.textBetween(0, Math.min(state.doc.content.size, 1200), ' ', ' ').replace(/\s+/g, ' ').trim().slice(0, 280);
     if (this.words == null) this.updateStats();
-    this.saving = saveDoc(this.docId, { json: this.editor.getJSON(), preview, words: this.words, title: this.title, settings: this.settings, comments: this.comments })
+    this.saving = saveDoc(this.docId, { json: this.editor.getJSON(), preview, words: this.words, title: this.title, settings: this.settings, comments: this.comments, file: this.fileRecord() })
       .then(() => {
         // Edits made while the write was in flight still need saving.
         if (this.rev !== rev) {
@@ -598,6 +656,7 @@ export class EditorScreen {
 
   rename(title) {
     const t = title.trim() || 'Untitled document';
+    if (t !== this.title && ['docx', 'html'].includes(this.file?.format)) this.markFileDirty();
     this.title = t;
     this.titleInput.value = t;
     this.updateTitle();
@@ -609,7 +668,10 @@ export class EditorScreen {
     this.applyGeometry();
     this.ruler.render();
     this.ribbon.update();
-    if (!transient) this.saveNow();
+    if (!transient) {
+      this.markFileDirty();
+      this.saveNow();
+    }
   }
 
   // ------------------------------------------------------------------ view
@@ -744,6 +806,188 @@ export class EditorScreen {
     openBackstage(this, section);
   }
 
+  // ------------------------------------------------------------------ files on the device
+  /** Ctrl+S: write to the linked file, or keep the browser copy up to date. */
+  /** Apply a title that's still being typed (the input only fires 'change' on blur). */
+  commitTitle() {
+    const typed = this.titleInput.value.trim() || 'Untitled document';
+    if (typed !== this.title) this.rename(typed);
+  }
+
+  async save() {
+    this.commitTitle();
+    if (this.file) return this.saveToFile();
+    await this.saveNow(false);
+    toast(canSaveToFiles() ? 'Saved in this browser. Use Save As (Ctrl+Shift+S) to save it as a file.' : 'Saved in this browser.', { type: 'success', timeout: 2600 });
+    return true;
+  }
+
+  fileMeta() {
+    return { title: this.title, settings: this.settings, comments: this.comments };
+  }
+
+  /** Write the document to its linked file. Resolves true when the file is up to date. */
+  async saveToFile() {
+    if (!this.file) return this.saveAs();
+    if (this.fileSaving) return (await this.fileSaving) === true;
+    // run() resolves true/false, or { saveAs } when the user chose to save elsewhere.
+    const run = async () => {
+      const { handle, name, format } = this.file;
+      if (!(await ensureWritePermission(handle))) {
+        toast(`LibreWord wasn't allowed to save to “${name}”. Use Save As to choose where to save.`, { type: 'error', timeout: 6000 });
+        return false;
+      }
+      // Another LibreWord tab may have saved this document to the file since;
+      // that's not an outside change, so pick up its record first.
+      const stored = await getDocFile(this.docId).catch(() => null);
+      if (stored?.lastModified > (this.file.lastModified || 0)) {
+        try {
+          if (await stored.handle.isSameEntry(handle)) this.file = { ...this.file, lastModified: stored.lastModified };
+        } catch { /* different file */ }
+      }
+      // Someone else (another app) changed the file since we read or wrote it.
+      let current;
+      try {
+        current = await handle.getFile();
+      } catch (err) {
+        if (err?.name === 'NotFoundError') {
+          toast(`“${name}” was moved or deleted. Choose where to save it.`, { type: 'error', timeout: 6000 });
+          return { saveAs: {} };
+        }
+        throw err;
+      }
+      if (this.file.lastModified && current.lastModified > this.file.lastModified + 1000) {
+        const choice = await openDialog({
+          title: 'File changed on disk',
+          body: h('p', {}, `“${name}” was changed outside LibreWord after you opened it. Saving will replace those changes with your version.`),
+          buttons: [
+            { label: 'Cancel', value: null },
+            { label: 'Save a Copy…', value: 'copy' },
+            { label: 'Replace', value: 'replace', primary: true },
+          ],
+        });
+        if (choice === 'copy') return { saveAs: {} };
+        if (choice !== 'replace') return false;
+      }
+      if (!FILE_FORMATS[format].lossless && !this.lossyAcknowledged) {
+        const choice = await openDialog({
+          title: `Keep using ${FILE_FORMATS[format].label}?`,
+          body: h('p', {}, `${LOSSY_NOTES[format]} To keep everything, save as a Word document instead. Your full document stays in LibreWord either way.`),
+          buttons: [
+            { label: 'Cancel', value: null },
+            { label: 'Save as Word Document…', value: 'docx' },
+            { label: `Keep ${FILE_FORMATS[format].label}`, value: 'keep', primary: true },
+          ],
+        });
+        if (choice === 'docx') return { saveAs: { format: 'docx' } };
+        if (choice !== 'keep') return false;
+        this.lossyAcknowledged = true;
+      }
+      const fileRev = this.fileRev;
+      await this.flush();
+      const blob = await renderDocumentBlob(this.editor, format, this.fileMeta());
+      const lastModified = await writeToHandle(handle, blob);
+      this.file = { ...this.file, lastModified };
+      // Changes made while writing (text, comments, settings) still need the next save.
+      this.fileDirty = this.fileRev !== fileRev;
+      await saveDoc(this.docId, { file: this.fileRecord() });
+      toast(`Saved to “${name}”`, { type: 'success', timeout: 1800 });
+      return true;
+    };
+    this.fileSaving = run()
+      .catch((err) => {
+        console.error(err);
+        toast(`Couldn't save “${this.file?.name}”: ${err.message || err}`, { type: 'error', timeout: 6000 });
+        return false;
+      })
+      .finally(() => {
+        this.fileSaving = null;
+        this.renderFileChip();
+      });
+    this.renderFileChip();
+    const result = await this.fileSaving;
+    if (result && typeof result === 'object' && result.saveAs) return this.saveAs(result.saveAs);
+    return result === true;
+  }
+
+  /**
+   * Save to a new file the user picks, and keep saving there. Without the File
+   * System Access API, this downloads a .docx copy instead.
+   */
+  async saveAs({ format = this.file?.format || 'docx' } = {}) {
+    this.commitTitle();
+    if (!canSaveToFiles()) {
+      await this.exportAs('docx');
+      toast('This browser can’t save straight to files, so a copy was downloaded. Chrome and Edge can save back to the same file.', { timeout: 6000 });
+      return false;
+    }
+    let handle;
+    try {
+      handle = await pickSaveLocation(fileNameFor(this.title, format), format);
+    } catch (err) {
+      toast(`Couldn't open the save dialog: ${err.message || err}`, { type: 'error' });
+      return false;
+    }
+    if (!handle) return false;
+    const previous = { file: this.file, dirty: this.fileDirty, lossy: this.lossyAcknowledged };
+    const chosen = formatOfName(handle.name) || 'docx';
+    this.file = { handle, name: handle.name, format: chosen, lastModified: 0 };
+    this.fileDirty = true;
+    this.lossyAcknowledged = false;
+    this.setSaveState(this.saveState);
+    const ok = await this.saveToFile();
+    if (!ok && this.file?.handle === handle) {
+      // Nothing was written: keep the document linked where it was before.
+      this.file = previous.file;
+      this.fileDirty = previous.dirty;
+      this.lossyAcknowledged = previous.lossy;
+      this.setSaveState(this.saveState);
+      this.renderFileChip();
+    }
+    return ok;
+  }
+
+  /** Stop writing to the linked file; the document stays in the browser. */
+  async unlinkFile() {
+    if (!this.file) return;
+    const name = this.file.name;
+    this.file = null;
+    this.fileDirty = false;
+    this.renderFileChip();
+    this.setSaveState(this.saveState);
+    await saveDoc(this.docId, { file: null });
+    toast(`No longer saving to “${name}”. Your document stays in LibreWord.`);
+  }
+
+  /**
+   * Before leaving this document: offer to save unsaved changes to the linked
+   * file (like Word on close). Resolves false if the user cancels. "Don't Save"
+   * leaves the file as it is; the changes stay in LibreWord, still marked unsaved.
+   */
+  async confirmLeave() {
+    if (this.leaveConfirmed || this.destroyed || !this.fileDirty || !this.file) return true;
+    const choice = await openDialog({
+      title: 'Save changes?',
+      body: h('p', {}, `Do you want to save your changes to “${this.file.name}”? Either way they stay in LibreWord.`),
+      buttons: [
+        { label: 'Cancel', value: null },
+        { label: 'Don’t Save', value: 'discard' },
+        { label: 'Save', value: 'save', primary: true },
+      ],
+    });
+    if (choice === null) return false;
+    if (choice === 'save' && !(await this.saveToFile())) return false;
+    this.leaveConfirmed = true;
+    return true;
+  }
+
+  /** Run `go` once leaving is confirmed. */
+  async leaveDocument(go) {
+    if (!(await this.confirmLeave())) return false;
+    go();
+    return true;
+  }
+
   async exportAs(format) {
     try {
       await this.flush();
@@ -792,12 +1036,13 @@ export class EditorScreen {
     }
   }
 
-  handleFiles(files, pos) {
+  handleFiles(files, pos, dataTransfer = null) {
     const images = [...(files || [])].filter((f) => f.type.startsWith('image/'));
     if (!images.length) {
       const docs = [...(files || [])].filter((f) => /\.(docx|md|markdown|txt|html?|rtf)$/i.test(f.name));
       if (docs.length && pos != null) {
-        this.nav_.onImport(docs[0]);
+        // Dropping a document opens it (linked to the file where the browser allows).
+        handleFromDataTransfer(dataTransfer).then((handle) => this.leaveDocument(() => this.nav_.onImport(docs[0], handle?.kind === 'file' ? handle : null)));
         return true;
       }
       return false;
@@ -995,6 +1240,7 @@ export class EditorScreen {
     this.commentsPane.render();
     this.applyView();
     this.ribbon.update();
+    this.markFileDirty();
     this.saveNow();
   }
 
@@ -1089,7 +1335,7 @@ export class EditorScreen {
     }
     if (!mod) return;
     const handled = {
-      s: () => this.saveNow(true),
+      s: () => (e.shiftKey ? this.saveAs() : this.save()),
       p: () => this.print(),
       f: () => (e.shiftKey ? null : this.openFind(false)),
       h: () => this.openFind(true),

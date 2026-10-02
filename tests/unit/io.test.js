@@ -253,3 +253,19 @@ describe('docx import', async () => {
     expect(r.html).toBe('<ul><li><p>a</p><ul><li><p>a1</p></li></ul></li><li><p>b</p></li></ul>');
   });
 });
+
+describe('file names', async () => {
+  const { fileNameFor, formatOfName } = await import('../../src/io/file-access.js');
+  it('keeps periods in titles and swaps only document extensions', () => {
+    expect(fileNameFor('Q3 vs. Q4 report', 'docx')).toBe('Q3 vs. Q4 report.docx');
+    expect(fileNameFor('Release v1.2 notes', 'md')).toBe('Release v1.2 notes.md');
+    expect(fileNameFor('notes.md', 'docx')).toBe('notes.docx');
+    expect(fileNameFor('a/b:c?', 'txt')).toBe('a-b-c-.txt');
+  });
+  it('maps file names to writable formats', () => {
+    expect(formatOfName('Report.DOCX')).toBe('docx');
+    expect(formatOfName('x.markdown')).toBe('md');
+    expect(formatOfName('page.htm')).toBe('html');
+    expect(formatOfName('old.rtf')).toBeNull();
+  });
+});

@@ -13,7 +13,8 @@
     "test:e2e": "node tests/e2e/smoke.mjs",
     "bench": "node tests/e2e/bench.mjs",
     "icons": "node scripts/generate-icons.mjs",
-    "test:a11y": "node tests/e2e/a11y.mjs"
+    "test:a11y": "node tests/e2e/a11y.mjs",
+    "test:files": "node tests/e2e/files.mjs"
   },
   "dependencies": {
     "@tiptap/core": "^3.31.4",
