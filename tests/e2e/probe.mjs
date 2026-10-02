@@ -13,12 +13,45 @@ const steps = {
     const open = indexedDB.open('probe', 1); open.onupgradeneeded = () => open.result.createObjectStore('s');
     open.onsuccess = () => { const tx = open.result.transaction('s', 'readwrite'); tx.objectStore('s').put({ handle: h }, 'k'); tx.oncomplete = res; tx.onerror = () => rej(tx.error); };
   }),
-  'handle round-trip through IndexedDB + isSameEntry': () => new Promise(async (res, rej) => {
+  'isSameEntry on two fresh handles': async () => { const d = await navigator.storage.getDirectory(); const a = await d.getFileHandle('q.bin', { create: true }); const b = await d.getFileHandle('q.bin'); await a.isSameEntry(b); },
+  'IDB round-trip only': () => new Promise(async (res, rej) => {
     const d = await navigator.storage.getDirectory(); const h = await d.getFileHandle('p5.bin', { create: true });
-    const open = indexedDB.open('probe2', 1); open.onupgradeneeded = () => open.result.createObjectStore('s');
+    const open = indexedDB.open('probe-830664', 1); open.onupgradeneeded = () => open.result.createObjectStore('s');
     open.onsuccess = () => {
       const tx = open.result.transaction('s', 'readwrite'); tx.objectStore('s').put({ handle: h }, 'k');
-      tx.oncomplete = () => { const g = open.result.transaction('s').objectStore('s').get('k'); g.onsuccess = async () => { await g.result.handle.isSameEntry(h); res(); }; g.onerror = () => rej(g.error); };
+      tx.oncomplete = () => { const g = open.result.transaction('s').objectStore('s').get('k'); g.onsuccess = async () => { const r = g.result.handle;  res(); }; g.onerror = () => rej(g.error); };
+    };
+  }),
+  'IDB round-trip + getFile': () => new Promise(async (res, rej) => {
+    const d = await navigator.storage.getDirectory(); const h = await d.getFileHandle('p5.bin', { create: true });
+    const open = indexedDB.open('probe-884883', 1); open.onupgradeneeded = () => open.result.createObjectStore('s');
+    open.onsuccess = () => {
+      const tx = open.result.transaction('s', 'readwrite'); tx.objectStore('s').put({ handle: h }, 'k');
+      tx.oncomplete = () => { const g = open.result.transaction('s').objectStore('s').get('k'); g.onsuccess = async () => { const r = g.result.handle; await r.getFile(); res(); }; g.onerror = () => rej(g.error); };
+    };
+  }),
+  'IDB round-trip + queryPermission': () => new Promise(async (res, rej) => {
+    const d = await navigator.storage.getDirectory(); const h = await d.getFileHandle('p5.bin', { create: true });
+    const open = indexedDB.open('probe-845805', 1); open.onupgradeneeded = () => open.result.createObjectStore('s');
+    open.onsuccess = () => {
+      const tx = open.result.transaction('s', 'readwrite'); tx.objectStore('s').put({ handle: h }, 'k');
+      tx.oncomplete = () => { const g = open.result.transaction('s').objectStore('s').get('k'); g.onsuccess = async () => { const r = g.result.handle; await r.queryPermission({ mode: 'readwrite' }); res(); }; g.onerror = () => rej(g.error); };
+    };
+  }),
+  'IDB round-trip + createWritable': () => new Promise(async (res, rej) => {
+    const d = await navigator.storage.getDirectory(); const h = await d.getFileHandle('p5.bin', { create: true });
+    const open = indexedDB.open('probe-50385', 1); open.onupgradeneeded = () => open.result.createObjectStore('s');
+    open.onsuccess = () => {
+      const tx = open.result.transaction('s', 'readwrite'); tx.objectStore('s').put({ handle: h }, 'k');
+      tx.oncomplete = () => { const g = open.result.transaction('s').objectStore('s').get('k'); g.onsuccess = async () => { const r = g.result.handle; const w = await r.createWritable(); await w.close(); res(); }; g.onerror = () => rej(g.error); };
+    };
+  }),
+  'IDB round-trip + isSameEntry': () => new Promise(async (res, rej) => {
+    const d = await navigator.storage.getDirectory(); const h = await d.getFileHandle('p5.bin', { create: true });
+    const open = indexedDB.open('probe-610130', 1); open.onupgradeneeded = () => open.result.createObjectStore('s');
+    open.onsuccess = () => {
+      const tx = open.result.transaction('s', 'readwrite'); tx.objectStore('s').put({ handle: h }, 'k');
+      tx.oncomplete = () => { const g = open.result.transaction('s').objectStore('s').get('k'); g.onsuccess = async () => { const r = g.result.handle; await r.isSameEntry(h); res(); }; g.onerror = () => rej(g.error); };
     };
   }),
 };
