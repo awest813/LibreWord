@@ -12,11 +12,11 @@ import assert from 'node:assert/strict';
 import mammoth from 'mammoth';
 import JSZip from 'jszip';
 
-import { startPreview, CHROME } from './server.mjs';
+import { startPreview, LAUNCH } from './server.mjs';
 
 const { base: BASE, stop } = await startPreview();
 
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await chromium.launch(LAUNCH);
 const context = await browser.newContext({ viewport: { width: 1400, height: 950 }, acceptDownloads: true });
 const page = await context.newPage();
 // This suite covers the file-input fallback used by Firefox and Safari; saving

@@ -5,11 +5,11 @@
 import { chromium } from 'playwright-core';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { startPreview, CHROME } from './server.mjs';
+import { startPreview, LAUNCH } from './server.mjs';
 
 const axeSource = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
 const { base, stop } = await startPreview();
-const browser = await chromium.launch({ executablePath: CHROME });
+const browser = await chromium.launch(LAUNCH);
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
 
 let total = 0;

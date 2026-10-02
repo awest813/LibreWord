@@ -68,7 +68,7 @@ npm run build && npm run test:a11y   # axe-core accessibility audit of every scr
 npm run build && npm run test:files  # saving back to files on the device
 ```
 
-The end-to-end suite drives the real app: typing and formatting, the ribbon, undo/redo, pagination invariants (every rendered line must fall inside a page's content area, before and after edits), find & replace, persistence across reloads, `.docx` and Markdown export (the `.docx` is parsed back to verify it), Markdown import and page setup. It uses `playwright-core`; set `CHROME_PATH` to point at a Chromium binary, or run `npx playwright-core install chromium` first.
+The end-to-end suite drives the real app: typing and formatting, the ribbon, undo/redo, pagination invariants (every rendered line must fall inside a page's content area, before and after edits), find & replace, persistence across reloads, `.docx` and Markdown export (the `.docx` is parsed back to verify it), Markdown import and page setup. It uses `playwright-core`; set `CHROME_PATH` to point at a Chromium binary, or run `npx playwright-core install --no-shell chromium` first (full Chromium is needed: the stripped-down headless shell lacks the File System Access features the app uses).
 
 ## Project structure
 
