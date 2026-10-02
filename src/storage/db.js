@@ -108,11 +108,13 @@ export async function getDoc(id) {
     html: content?.html ?? '',
     settings: { ...DEFAULT_SETTINGS, ...(content?.settings || {}), margins: { ...DEFAULT_SETTINGS.margins, ...(content?.settings?.margins || {}) } },
     comments: content?.comments || {},
+    // Link to a file on the user's device: { handle, name, format, lastModified }.
+    file: content?.file?.handle ? content.file : null,
   };
 }
 
 /** Create a document from HTML (templates, imports) or editor JSON. */
-export async function createDoc({ title = 'Untitled document', html = '', json = null, settings = {}, comments = {} } = {}) {
+export async function createDoc({ title = 'Untitled document', html = '', json = null, settings = {}, comments = {}, file = null } = {}) {
   const db = await getDb();
   const id = newId();
   const now = Date.now();
@@ -126,18 +128,19 @@ export async function createDoc({ title = 'Untitled document', html = '', json =
       updatedAt: now,
       preview: text.slice(0, 280),
       words: text ? text.split(/\s+/).length : 0,
+      fileName: file?.name || null,
     }),
-    tx.objectStore('content').put({ id, json, html, settings: { ...DEFAULT_SETTINGS, ...settings }, comments }),
+    tx.objectStore('content').put({ id, json, html, settings: { ...DEFAULT_SETTINGS, ...settings }, comments, file }),
   ]);
   await tx.done;
   return id;
 }
 
 /**
- * Persist a document. Any of `title`, `json`, `settings`, `comments`, `preview`, `words`
+ * Persist a document. Any of `title`, `json`, `settings`, `comments`, `file`, `preview`, `words`
  * may be omitted to leave the stored value untouched.
  */
-export async function saveDoc(id, { title, json, settings, comments, preview, words } = {}) {
+export async function saveDoc(id, { title, json, html, settings, comments, file, preview, words } = {}) {
   const db = await getDb();
   const tx = db.transaction(['meta', 'content'], 'readwrite');
   const metaStore = tx.objectStore('meta');
@@ -157,8 +160,17 @@ export async function saveDoc(id, { title, json, settings, comments, preview, wo
     nextContent.json = json;
     nextContent.html = '';
   }
+  if (html !== undefined) {
+    // Replace the body with freshly imported HTML (parsed when next opened).
+    nextContent.html = html;
+    nextContent.json = null;
+  }
   if (settings !== undefined) nextContent.settings = settings;
   if (comments !== undefined) nextContent.comments = comments;
+  if (file !== undefined) {
+    nextContent.file = file; // null unlinks
+    meta.fileName = file?.name || null;
+  }
 
   await Promise.all([metaStore.put(meta), contentStore.put(nextContent)]);
   await tx.done;
@@ -197,7 +209,11 @@ export async function exportBackup() {
     format: BACKUP_FORMAT,
     version: 1,
     exportedAt: new Date().toISOString(),
-    documents: metas.map((m) => ({ meta: m, content: byId.get(m.id) || { id: m.id, json: null, html: '' } })),
+    // File handles only make sense on this device, so backups leave them out.
+    documents: metas.map((m) => {
+      const { file: _file, ...content } = byId.get(m.id) || { id: m.id, json: null, html: '' };
+      return { meta: { ...m, fileName: null }, content };
+    }),
   };
 }
 
@@ -233,6 +249,29 @@ export async function importBackup(data) {
   }
   await tx.done;
   return result;
+}
+
+/** The document already linked to this file on disk, if any. */
+export async function findDocByFile(handle) {
+  if (!handle?.isSameEntry) return null;
+  const db = await getDb();
+  // Only documents linked to a file of the same name can match; check those.
+  const candidates = (await db.getAll('meta')).filter((m) => m.fileName === handle.name).sort((a, b) => b.updatedAt - a.updatedAt);
+  for (const m of candidates) {
+    const c = await db.get('content', m.id);
+    try {
+      if (c?.file?.handle && (await c.file.handle.isSameEntry(handle))) return { id: c.id, title: m.title, file: c.file };
+    } catch {
+      /* stale handle */
+    }
+  }
+  return null;
+}
+
+/** The stored file link of a document (fresh from the database). */
+export async function getDocFile(id) {
+  const db = await getDb();
+  return (await db.get('content', id))?.file || null;
 }
 
 // ---------------------------------------------------------------------------

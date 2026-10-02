@@ -50,8 +50,8 @@ ${staticHtml(editor)}
 </html>`;
 }
 
-export async function exportDocument(editor, format, { title, settings, comments = {} }) {
-  const name = safeFileName(title || 'Untitled document');
+/** The document as a file in the given format (docx, html, md, txt). */
+export async function renderDocumentBlob(editor, format, { title, settings, comments = {} }) {
   switch (format) {
     case 'docx': {
       const { docxBlob } = await import('./docx.js');
@@ -64,27 +64,29 @@ export async function exportDocument(editor, format, { title, settings, comments
           return null;
         }
       });
-      const blob = await docxBlob(editor.getJSON(), settings, { title, comments, tocPages });
-      downloadBlob(blob, `${name}.docx`);
-      return;
+      return docxBlob(editor.getJSON(), settings, { title, comments, tocPages });
     }
     case 'html':
-      downloadBlob(new Blob([standaloneHtml(editor, title, settings)], { type: 'text/html;charset=utf-8' }), `${name}.html`);
-      return;
+      return new Blob([standaloneHtml(editor, title, settings)], { type: 'text/html;charset=utf-8' });
     case 'md': {
       const { jsonToMarkdown } = await import('./markdown.js');
-      downloadBlob(new Blob([jsonToMarkdown(editor.getJSON())], { type: 'text/markdown;charset=utf-8' }), `${name}.md`);
-      return;
+      return new Blob([jsonToMarkdown(editor.getJSON())], { type: 'text/markdown;charset=utf-8' });
     }
     case 'txt':
-      downloadBlob(new Blob([editor.getText({ blockSeparator: '\n\n' })], { type: 'text/plain;charset=utf-8' }), `${name}.txt`);
-      return;
-    case 'pdf':
-      printDocument(title);
-      return;
+      return new Blob([editor.getText({ blockSeparator: '\n\n' })], { type: 'text/plain;charset=utf-8' });
     default:
       throw new Error(`Unknown export format: ${format}`);
   }
+}
+
+export async function exportDocument(editor, format, meta) {
+  if (format === 'pdf') {
+    printDocument(meta.title);
+    return;
+  }
+  const name = safeFileName(meta.title || 'Untitled document');
+  const ext = { docx: 'docx', html: 'html', md: 'md', txt: 'txt' }[format];
+  downloadBlob(await renderDocumentBlob(editor, format, meta), `${name}.${ext}`);
 }
 
 /**

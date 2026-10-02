@@ -23,6 +23,7 @@ LibreWord looks and works like a desktop word processor: a ribbon, real pages wi
 | **View** | Print/Web layout, ruler with draggable margins and indent, zoom 10–500 % (Ctrl + wheel, one page, page width), formatting marks, focus mode, dark mode, full screen |
 | **Files** | Export **.docx** (styles, lists, tables, images, comments, TOC with page numbers, page setup, headers/footers), **PDF** (vector, via the print dialog), **HTML**, **Markdown**, **plain text**. Import **.docx** with formatting preserved — fonts, sizes, colours, alignment, spacing, lists, merged table cells, images, links, page setup, headers/footers, threaded comments, footnotes — plus **.md**, **.html**, **.txt**, **.rtf**. Or just drop a file on the window; paste from Word keeps lists |
 | **Review** | Comments with replies, resolve and delete, exported as native Word comments; version history with restore; backup/restore of all documents |
+| **Save to your files** | In Chrome and Edge, a document opened from your computer stays linked to its file: **Save** (Ctrl+S) writes your changes back in the same format (.docx, .md, .html, .txt), **Save As** (Ctrl+Shift+S) saves to a new file and keeps saving there. A title-bar indicator shows unsaved changes; LibreWord asks before closing with unsaved changes, warns if another app changed the file, and notes what Markdown, HTML or text can't keep. Other browsers download a copy instead |
 | **Storage** | Auto-save to IndexedDB, document list with search, rename, duplicate and delete; multi-tab change detection; documents from LibreWord v1 are migrated automatically |
 | **PWA** | Installable, works fully offline after the first visit, and registers as a handler for `.docx`/`.md`/`.txt`/`.html` files |
 
@@ -64,6 +65,7 @@ npm test                         # unit tests (Vitest): converters, search, pars
 npm run build && npm run test:e2e   # end-to-end tests in headless Chromium
 npm run build && npm run bench      # editing benchmark on a large document
 npm run build && npm run test:a11y   # axe-core accessibility audit of every screen
+npm run build && npm run test:files  # saving back to files on the device
 ```
 
 The end-to-end suite drives the real app: typing and formatting, the ribbon, undo/redo, pagination invariants (every rendered line must fall inside a page's content area, before and after edits), find & replace, persistence across reloads, `.docx` and Markdown export (the `.docx` is parsed back to verify it), Markdown import and page setup. It uses `playwright-core`; set `CHROME_PATH` to point at a Chromium binary, or run `npx playwright-core install chromium` first.

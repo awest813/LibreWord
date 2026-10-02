@@ -1,7 +1,8 @@
 import { h, closePopover } from './dom.js';
 import { icon } from './icons.js';
 import { EXPORT_FORMATS } from '../io/export.js';
-import { templateCards, documentList, pickFile } from './start.js';
+import { templateCards, documentList } from './start.js';
+import { pickFileToOpen, canSaveToFiles, FILE_FORMATS } from '../io/file-access.js';
 import { PAGE_SIZES, formatLength } from '../editor/page-setup.js';
 import { listVersions } from '../storage/db.js';
 import { confirmDialog } from './dialog.js';
@@ -32,10 +33,12 @@ export function openBackstage(app, section = 'info') {
 
   const main = h('section', { class: 'backstage-main' });
   const sections = {
-    home: { label: 'Home', icon: 'home', render: () => [h('h1', {}, 'Good to see you'), templateCards({ onTemplate: (t) => { close(); app.nav_.onNewDoc(t); }, onImport: importFile }), documentList({ onOpen: openDoc, compact: true }).el] },
-    new: { label: 'New', icon: 'newDoc', render: () => [h('h1', {}, 'New'), templateCards({ onTemplate: (t) => { close(); app.nav_.onNewDoc(t); } })] },
+    home: { label: 'Home', icon: 'home', render: () => [h('h1', {}, 'Good to see you'), templateCards({ onTemplate: (t) => { close(); app.leaveDocument(() => app.nav_.onNewDoc(t)); }, onImport: importFile }), documentList({ onOpen: openDoc, compact: true }).el] },
+    new: { label: 'New', icon: 'newDoc', render: () => [h('h1', {}, 'New'), templateCards({ onTemplate: (t) => { close(); app.leaveDocument(() => app.nav_.onNewDoc(t)); } })] },
     open: { label: 'Open', icon: 'open', render: () => [h('h1', {}, 'Open'), h('button', { type: 'button', class: 'btn btn-primary', onclick: importFile, html: `${icon('upload')} Browse this device…` }), documentList({ onOpen: openDoc }).el] },
     info: { label: 'Info', icon: 'info', render: info },
+    save: { label: 'Save', icon: 'save', render: () => { close(); app.save(); return []; } },
+    saveAs: { label: 'Save As', icon: 'fileDown', render: () => { close(); app.saveAs(); return []; } },
     history: { label: 'Version History', icon: 'clock', render: history },
     export: { label: 'Save a Copy', icon: 'download', render: exportSection },
     print: { label: 'Print', icon: 'print', render: () => { close(); app.print(); return []; } },
@@ -43,14 +46,14 @@ export function openBackstage(app, section = 'info') {
 
   function openDoc(id) {
     close();
-    if (id !== app.docId) app.nav_.onOpenDoc(id);
+    if (id !== app.docId) app.leaveDocument(() => app.nav_.onOpenDoc(id));
   }
 
   async function importFile() {
-    const file = await pickFile();
-    if (file) {
+    const picked = await pickFileToOpen();
+    if (picked) {
       close();
-      app.nav_.onImport(file);
+      app.leaveDocument(() => app.nav_.onImport(picked.file, picked.handle));
     }
   }
 
@@ -67,10 +70,26 @@ export function openBackstage(app, section = 'info') {
     add('Created', when(app.createdAt));
     add('Paper', `${size.label}, ${s.orientation}`);
     add('Margins', `${formatLength(s.margins.top)} top · ${formatLength(s.margins.bottom)} bottom · ${formatLength(s.margins.left)} left · ${formatLength(s.margins.right)} right`);
-    add('Stored', 'On this device only (browser storage). Save a copy to back it up.');
+    if (app.file) {
+      const state = app.fileDirty ? 'Unsaved changes' : 'Up to date';
+      add('File', `${app.file.name} (${FILE_FORMATS[app.file.format]?.label || app.file.format}) — ${state}`);
+      add('Stored', 'In this browser, and saved to the file above whenever you press Save.');
+    } else {
+      add('Stored', canSaveToFiles()
+        ? 'In this browser only. Use Save As to save it as a file you can keep or share.'
+        : 'In this browser only. Use Save a Copy to download a file you can keep or share.');
+    }
+    const fileActions = app.file
+      ? [
+        h('button', { type: 'button', class: 'btn btn-primary', disabled: !app.fileDirty || null, onclick: () => { close(); app.saveToFile(); } }, `Save to ${app.file.name}`),
+        h('button', { type: 'button', class: 'btn', onclick: () => { close(); app.saveAs(); } }, 'Save As…'),
+        h('button', { type: 'button', class: 'btn', onclick: async () => { await app.unlinkFile(); select('info'); } }, 'Stop Saving to This File'),
+      ]
+      : canSaveToFiles() ? [h('button', { type: 'button', class: 'btn btn-primary', onclick: () => { close(); app.saveAs(); } }, 'Save As…')] : [];
     return [
       h('h1', {}, 'Info'),
       dl,
+      fileActions.length ? h('div', { class: 'backstage-actions' }, ...fileActions) : null,
       h('p', {}),
       h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
         h('button', { type: 'button', class: 'btn', onclick: () => { close(); app.pageSetupDialog(); } }, 'Page Setup…'),
@@ -83,7 +102,7 @@ export function openBackstage(app, section = 'info') {
 
   function history() {
     const body = h('div', { class: 'version-list' }, h('p', { class: 'muted' }, 'Loading…'));
-    const REASONS = { opened: 'Before editing session', auto: 'Autosaved', 'before-restore': 'Before restoring a version' };
+    const REASONS = { opened: 'Before editing session', auto: 'Autosaved', 'before-restore': 'Before restoring a version', 'before-reload': 'Before reloading the file from disk' };
     listVersions(app.docId).then((versions) => {
       body.replaceChildren();
       if (!versions.length) {
@@ -147,7 +166,7 @@ export function openBackstage(app, section = 'info') {
   }
   nav.append(
     h('div', { class: 'spacer' }),
-    h('button', { type: 'button', html: `${icon('close')}<span>Close document</span>`, onclick: () => { close(); app.nav_.onHome(); } }),
+    h('button', { type: 'button', html: `${icon('close')}<span>Close document</span>`, onclick: () => { close(); app.leaveDocument(() => app.nav_.onHome()); } }),
   );
   const el = h('div', { class: 'backstage', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'File' }, nav, main);
   document.body.append(el);

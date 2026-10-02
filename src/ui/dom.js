@@ -213,6 +213,21 @@ export function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
+/** Show the browser's file chooser. Resolves to the chosen File, or null if cancelled. */
+export function pickFileInput(accept = '') {
+  return new Promise((resolve) => {
+    const input = h('input', { type: 'file', accept, style: { display: 'none' } });
+    const done = (file) => {
+      resolve(file);
+      input.remove();
+    };
+    input.addEventListener('change', () => done(input.files?.[0] || null));
+    input.addEventListener('cancel', () => done(null));
+    document.body.append(input);
+    input.click();
+  });
+}
+
 export const safeFileName = (value = 'document') => {
   const name = String(value).trim().replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '-').replace(/[. ]+$/g, '');
   return (name || 'document').slice(0, 120);

@@ -1,4 +1,4 @@
-import { h, formatDate, toast, debounce, showPopover, menu, downloadBlob } from './dom.js';
+import { h, formatDate, toast, debounce, showPopover, menu, downloadBlob, pickFileInput } from './dom.js';
 import { icon } from './icons.js';
 import { listDocs, deleteDoc, duplicateDoc, renameDoc, exportBackup, importBackup } from '../storage/db.js';
 import { TEMPLATES } from '../templates.js';
@@ -33,17 +33,7 @@ export function templateCards({ onTemplate, onImport }) {
   return row;
 }
 
-export function pickFile(accept = IMPORT_ACCEPT) {
-  return new Promise((resolve) => {
-    const input = h('input', { type: 'file', accept, style: { display: 'none' } });
-    input.addEventListener('change', () => {
-      resolve(input.files?.[0] || null);
-      input.remove();
-    });
-    document.body.append(input);
-    input.click();
-  });
-}
+export const pickFile = (accept = IMPORT_ACCEPT) => pickFileInput(accept);
 
 /**
  * The document list. Returns an element plus a refresh() function.
@@ -111,7 +101,7 @@ export function documentList({ onOpen, compact = false }) {
             if (e.key === 'Delete') remove(d);
           },
         },
-        h('td', {}, h('div', { class: 'doc-name', html: icon('file') }, h('div', { style: { minWidth: 0 } }, h('strong', {}, d.title || 'Untitled document'), compact ? null : h('small', {}, d.preview || 'Empty document')))),
+        h('td', {}, h('div', { class: 'doc-name', html: icon('file') }, h('div', { style: { minWidth: 0 } }, h('strong', {}, d.title || 'Untitled document'), compact ? null : h('small', {}, d.fileName ? `Saves to ${d.fileName}` : d.preview || 'Empty document')))),
         h('td', { class: 'col-date' }, formatDate(d.updatedAt)),
         h('td', { class: 'col-date' }, String(d.words ?? 0)),
         h('td', { class: 'doc-actions' }, more),
