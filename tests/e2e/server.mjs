@@ -9,6 +9,12 @@ import { setTimeout as sleep } from 'node:timers/promises';
 const PREINSTALLED = '/opt/pw-browsers/chromium';
 export const CHROME = process.env.CHROME_PATH || (existsSync(PREINSTALLED) ? PREINSTALLED : undefined);
 
+// Without an explicit binary, run full Chromium in its new headless mode
+// rather than Playwright's default chrome-headless-shell: the shell leaves out
+// browser features the app relies on (File System Access permissions and
+// file handles stored in IndexedDB crash it).
+export const LAUNCH = CHROME ? { executablePath: CHROME } : { channel: 'chromium' };
+
 const freePort = () =>
   new Promise((resolve, reject) => {
     const srv = createServer();
