@@ -57,8 +57,9 @@ const steps = {
 };
 
 let bad = 0;
+console.log(process.env.PROBE_HEADED ? '-- headed --' : '-- headless --');
 for (const [name, fn] of Object.entries(steps)) {
-  const browser = await chromium.launch(LAUNCH);
+  const browser = await chromium.launch({ ...LAUNCH, headless: !process.env.PROBE_HEADED });
   const page = await (await browser.newContext()).newPage();
   let died = false;
   browser.on('disconnected', () => { died = true; });
