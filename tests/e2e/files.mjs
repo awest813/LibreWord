@@ -19,13 +19,15 @@ const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 // A browser crash would otherwise surface as a cascade of "target closed" failures.
-const crashed = (what) => () => { console.error(`\n${what} — is this a full Chromium build? (see tests/e2e/server.mjs)`); stop(); process.exit(1); };
+const crashed = (what) => () => { console.error(`\n${what} during “${current}” — is this a full Chromium build? (see tests/e2e/server.mjs)`); stop(); process.exit(1); };
 page.on('crash', crashed('The page crashed'));
 const onExit = crashed('The browser exited');
 browser.on('disconnected', onExit);
 
 let failures = 0;
+let current = 'startup';
 async function test(name, fn) {
+  current = name;
   try {
     await fn();
     console.log(`  ✓ ${name}`);
