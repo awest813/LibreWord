@@ -43,7 +43,7 @@ const CASES = {
   lower: (s) => s.toLocaleLowerCase(),
   upper: (s) => s.toLocaleUpperCase(),
   sentence: (s) => s.toLocaleLowerCase().replace(/(^\s*\p{L}|[.!?]\s+\p{L})/gmu, (m) => m.toLocaleUpperCase()),
-  title: (s) => s.toLocaleLowerCase().replace(/(^|[\s\-–—(["'“‘])(\p{L})/gu, (_m, a, b) => a + b.toLocaleUpperCase()),
+  title: (s) => s.toLocaleLowerCase().replace(/(^|[\s\-–—(["'“‘\ufffc])(\p{L})/gu, (_m, a, b) => a + b.toLocaleUpperCase()),
   toggle: (s) => [...s].map((c) => (c === c.toLocaleUpperCase() ? c.toLocaleLowerCase() : c.toLocaleUpperCase())).join(''),
 };
 

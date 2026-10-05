@@ -181,7 +181,9 @@ export class EditorScreen {
     // Edits are always kept in the browser, but warn before leaving with
     // changes that haven't been written to the linked file yet.
     const onBeforeUnload = (e) => {
-      if (!this.fileDirty || this.leaveConfirmed) return;
+      // Also warn when edits can't be stored: autosave paused by another tab, or the document deleted.
+      const unstored = (this.conflict && this.conflictDirty) || (this.docGone && this.saveState !== 'saved');
+      if (!unstored && (!this.fileDirty || this.leaveConfirmed)) return;
       e.preventDefault();
       e.returnValue = '';
     };
@@ -217,6 +219,8 @@ export class EditorScreen {
           // Pause autosave so this tab doesn't silently overwrite the other tab's changes.
           // Saving explicitly (or leaving the document) keeps this tab's version.
           this.conflict = true;
+          // Only this tab's own unsaved edits are worth writing over the other tab's.
+          this.conflictDirty = this.saveState !== 'saved';
           this.setSaveState('conflict');
           toast('This document was changed in another tab. Reload to see those changes, or Save to keep yours.', {
             timeout: 15000,
@@ -459,6 +463,7 @@ export class EditorScreen {
       this.markFileDirty();
     }
     this.rev++;
+    if (this.conflict) this.conflictDirty = true;
     this.setSaveState(this.conflict ? 'conflict' : 'unsaved');
     this.queueSave();
     this.statsDebounced();
@@ -567,7 +572,12 @@ export class EditorScreen {
     this.queueSave.cancel();
     if (this.destroyed || !this.editor) return;
     if (this.conflict) {
-      if (!force) return;
+      // Keep this tab's version only when asked to, and only if it has edits of its own;
+      // an untouched tab is just stale and must not overwrite the other tab's work.
+      if (!force || !this.conflictDirty) {
+        if (!force) this.conflictDirty = true;
+        return;
+      }
       this.conflict = false;
     }
     if (this.saving) {
@@ -584,7 +594,8 @@ export class EditorScreen {
         if (stored === false) {
           // The document was deleted (e.g. from another tab): nothing was written.
           this.setSaveState('error');
-          toast('This document no longer exists in this browser. Use Save a Copy to keep your work.', { type: 'error', timeout: 8000 });
+          if (!this.docGone) toast('This document no longer exists in this browser. Use Save a Copy to keep your work.', { type: 'error', timeout: 8000 });
+          this.docGone = true;
           return;
         }
         // Edits made while the write was in flight still need saving.
@@ -668,7 +679,8 @@ export class EditorScreen {
         await this.saving;
         continue;
       }
-      if (this.saveState === 'saved' || (this.conflict && !force)) break;
+      // Retrying straight after a failed write (e.g. the document was deleted) won't help.
+      if (this.saveState === 'saved' || (i > 0 && this.saveState === 'error') || (this.conflict && !(force && this.conflictDirty))) break;
       await this.saveNow(false, { force });
     }
   }
@@ -836,6 +848,13 @@ export class EditorScreen {
   async save() {
     this.commitTitle();
     if (this.file) return this.saveToFile();
+    if (this.conflict && !this.conflictDirty) {
+      toast('This tab has no changes of its own to save. Reload to see the other tab’s changes.', {
+        timeout: 8000,
+        action: { label: 'Reload', run: () => !this.destroyed && this.nav_.onOpenDoc(this.docId, { force: true }) },
+      });
+      return false;
+    }
     await this.saveNow(false, { force: true });
     toast(canSaveToFiles() ? `Saved in this browser. Use Save As (${shortcutLabel('Mod-Shift-S')}) to save it as a file.` : 'Saved in this browser.', { type: 'success', timeout: 2600 });
     return true;
@@ -1325,10 +1344,15 @@ export class EditorScreen {
 
   // ------------------------------------------------------------------ keyboard
   handleKeydown(e) {
-    // The backstage and dialogs handle their own keys.
-    if (this.destroyed || this.closeBackstage || document.querySelector('dialog[open]')) return;
+    // Dialogs and the backstage handle their own keys, except Save, Print and Open,
+    // which close the backstage and run (rather than falling through to the browser).
+    if (this.destroyed || document.querySelector('dialog[open]')) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
+    if (this.closeBackstage) {
+      if (!mod || !['s', 'p', 'o'].includes(key)) return;
+      this.closeBackstage();
+    }
     if (e.key === 'Escape') {
       if (isPopoverOpen()) return;
       if (this.screen.classList.contains('focus-mode')) {

@@ -534,6 +534,43 @@ await test('a save from another tab pauses autosave instead of overwriting it', 
   await other.close();
 });
 
+await test('leaving an untouched tab does not overwrite another tab’s save', async () => {
+  await page.click('.app-logo');
+  await page.click('.template-card >> nth=0');
+  await editorReady();
+  await page.click('.lw-document');
+  await page.keyboard.type('original');
+  await page.evaluate(() => window.libreword.screen.flush());
+  const id = await page.evaluate(() => window.libreword.screen.docId);
+  const other = await context.newPage();
+  other.on('pageerror', (e) => errors.push(e.message));
+  await other.goto(`${BASE}#/doc/${id}`);
+  await other.waitForFunction(() => window.libreword?.editor && !window.libreword.editor.isDestroyed);
+  await other.evaluate(() => window.libreword.editor.commands.setContent('<p>edited in the other tab</p>'));
+  await other.evaluate(() => window.libreword.screen.flush());
+  await page.waitForSelector('.save-state:has-text("another tab")');
+  await page.click('.app-logo'); // this tab never edited after the other tab saved
+  await page.waitForSelector('.template-card');
+  await other.reload();
+  await other.waitForFunction(() => window.libreword?.editor && !window.libreword.editor.isDestroyed);
+  assert.equal(await other.evaluate(() => window.libreword.editor.getText()), 'edited in the other tab');
+  await other.close();
+});
+
+await test('Ctrl+S in the File backstage saves instead of reaching the browser', async () => {
+  await page.click('.doc-row >> nth=0');
+  await editorReady();
+  await page.click('.ribbon-tab.is-file');
+  await page.waitForSelector('.backstage');
+  const prevented = await page.evaluate(() => {
+    const e = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true });
+    document.activeElement.dispatchEvent(e);
+    return e.defaultPrevented;
+  });
+  assert.equal(prevented, true);
+  await page.waitForSelector('.backstage', { state: 'detached' });
+});
+
 await test('no runtime errors', async () => {
   assert.deepEqual(errors, []);
 });

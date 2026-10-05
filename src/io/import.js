@@ -71,6 +71,8 @@ export function rtfToText(rtf) {
   // otherwise); consecutive ones are decoded together so double-byte code pages work.
   const decode = rtfDecoder(rtf);
   let bytes = [];
+  // \ucN: how many fallback characters follow each \uN (per group, default 1).
+  const uc = [1];
   const emit = (s) => {
     if (bytes.length) out += decode(bytes);
     bytes = [];
@@ -80,24 +82,30 @@ export function rtfToText(rtf) {
     const c = rtf[i];
     if (c === '{') {
       depth++;
+      uc.push(uc[uc.length - 1]);
       if (rtf.startsWith('{\\*', i) || /^\{\\(fonttbl|colortbl|stylesheet|info|pict|header|footer)/.test(rtf.slice(i, i + 12))) {
         if (skipDepth < 0) skipDepth = depth;
       }
     } else if (c === '}') {
       if (depth === skipDepth) skipDepth = -1;
       depth--;
+      if (uc.length > 1) uc.pop();
     } else if (c === '\\') {
       const m = /^\\([a-z]+)(-?\d+)? ?|^\\'([0-9a-f]{2})|^\\(.)/i.exec(rtf.slice(i));
       if (!m) continue;
       i += m[0].length - 1;
       if (skipDepth >= 0) continue;
-      if (m[1] === 'par' || m[1] === 'line') emit('\n');
+      if (m[1] === 'uc' && m[2]) uc[uc.length - 1] = Math.max(0, Number(m[2]));
+      else if (m[1] === 'par' || m[1] === 'line') emit('\n');
       else if (m[1] === 'tab') emit('\t');
       else if (m[1] === 'u' && m[2]) {
         emit(String.fromCharCode(Number(m[2]) < 0 ? Number(m[2]) + 65536 : Number(m[2])));
-        // Skip the ANSI fallback that follows \uN (\uc1 default): a character or a \'xx escape.
-        if (/^\\'[0-9a-f]{2}/i.test(rtf.slice(i + 1, i + 5))) i += 4;
-        else if (rtf[i + 1] && !'\\{}'.includes(rtf[i + 1])) i++;
+        // Skip the ANSI fallback that follows \uN: \ucN units, each a character or a \'xx escape.
+        for (let k = 0; k < uc[uc.length - 1]; k++) {
+          if (/^\\'[0-9a-f]{2}/i.test(rtf.slice(i + 1, i + 5))) i += 4;
+          else if (rtf[i + 1] && !'\\{}'.includes(rtf[i + 1])) i++;
+          else break;
+        }
       }
       else if (m[3]) bytes.push(parseInt(m[3], 16));
       else if (m[4] && '{}\\'.includes(m[4])) emit(m[4]);

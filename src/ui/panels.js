@@ -148,8 +148,9 @@ export class FindPanel {
   }
 
   replaceAll() {
-    const n = searchKey.getState(this.app.editor.state).results.length;
-    if (n) this.app.editor.commands.replaceAll(this.replaceInput.value);
+    let n = searchKey.getState(this.app.editor.state).results.length;
+    // The command returns the real count, which can exceed the highlighted matches.
+    if (n) n = Number(this.app.editor.commands.replaceAll(this.replaceInput.value)) || n;
     this.app.toast(n ? `Replaced ${n} occurrence${n === 1 ? '' : 's'}.` : 'Nothing to replace.');
   }
 }
