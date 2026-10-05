@@ -1,7 +1,7 @@
 import {
   AlignmentType, BorderStyle, Document, ExternalHyperlink, Footer, Header, HeadingLevel, ImageRun, LevelFormat,
   PageBreak, PageNumber, PageOrientation, Paragraph, ShadingType, Tab, Table, TableCell, TableOfContents, TableRow,
-  TextRun, WidthType, Packer, UnderlineType, CommentRangeStart, CommentRangeEnd, CommentReference,
+  TextRun, WidthType, Packer, UnderlineType, CommentRangeStart, CommentRangeEnd, CommentReference, LevelOverride,
 } from 'docx';
 import { pageGeometry, TWIPS_PER_PX } from '../editor/page-setup.js';
 import { cssLengthToPx } from '../editor/paragraph-format.js';
@@ -164,6 +164,7 @@ class Converter {
     this.geometry = geometry;
     this.listInstance = 0;
     this.orderedStarts = new Set(); // start numbers other than 1, each needs its own numbering config
+    this.orderedLists = []; // { reference, instance, level, start } for every ordered list
     this.textIndex = 0;
     // comment id → { first, last, ids: [numeric docx ids for the thread] }
     this.commentAnchors = commentAnchors;
@@ -319,6 +320,7 @@ class Converter {
         const start = Number.isInteger(n.attrs?.start) && n.attrs.start >= 0 ? n.attrs.start : 1;
         if (n.type === 'orderedList' && start !== 1) this.orderedStarts.add(start);
         const orderedRef = start !== 1 ? `lw-ordered-${start}` : 'lw-ordered';
+        if (instance) this.orderedLists.push({ reference: orderedRef, instance, level: Math.min(level, 8), start });
         const out = [];
         for (const item of n.content || []) {
           const [first, ...rest] = item.content || [];
@@ -385,7 +387,11 @@ class Converter {
 const BULLETS = ['•', '◦', '▪', '•', '◦', '▪', '•', '◦', '▪'];
 const ORDERED_FORMATS = [LevelFormat.DECIMAL, LevelFormat.LOWER_LETTER, LevelFormat.LOWER_ROMAN];
 
-/** Numbered-list definition; `start` sets the first number (docx's instances restart level 0 at it). */
+/**
+ * Numbered-list definition; `start` sets the first number. Each list gets its
+ * own numbering instance, but docx only restarts level 0 of an instance — see
+ * restartNestedLists() for the others.
+ */
 const orderedNumbering = (reference, start = 1) => ({
   reference,
   levels: Array.from({ length: 9 }, (_, level) => ({
@@ -475,7 +481,7 @@ export async function buildDocx(json, settings, { title = 'Document', author = '
   const header = headerFooter(settings.header, false, false);
   const footer = headerFooter(settings.footer, settings.pageNumbers, true);
 
-  return new Document({
+  const file = new Document({
     creator: author,
     title,
     comments: commentData.options,
@@ -543,6 +549,31 @@ export async function buildDocx(json, settings, { title = 'Document', author = '
       },
     ],
   });
+  restartNestedLists(file, conv.orderedLists);
+  return file;
+}
+
+/**
+ * docx writes a <w:startOverride> only for level 0 of each numbering
+ * instance, so Word continues a nested list's numbering from the previous
+ * nested list at that level (c, d… instead of a). Create the instances of
+ * nested lists up front with a restart for the level they're used at; the
+ * paragraphs then reuse them.
+ */
+function restartNestedLists(file, lists) {
+  // This reaches into docx internals; if a docx upgrade changes them, export
+  // still works and nested lists merely keep Word's default numbering.
+  try {
+    const numbering = file.Numbering;
+    for (const { reference, instance, level, start } of lists) {
+      if (!level) continue;
+      numbering.createConcreteNumberingInstance(reference, instance);
+      const concrete = numbering.ConcreteNumbering.find((c) => c.reference === reference && c.instance === instance);
+      if (Array.isArray(concrete?.root)) concrete.root.push(new LevelOverride(level, start));
+    }
+  } catch (err) {
+    console.warn('Could not restart nested list numbering', err);
+  }
 }
 
 export async function docxBlob(json, settings, meta) {

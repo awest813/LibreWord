@@ -330,6 +330,38 @@ describe('io regressions', async () => {
     expect(html).toBe('<ol start="5"><li><p>five</p></li><li><p>six</p></li></ol><ol><li><p>one</p></li></ol>');
   });
 
+  it('restarts every nested ordered list in Word', async () => {
+    const ol = (start, ...items) => ({ type: 'orderedList', attrs: { start }, content: items });
+    const doc = { type: 'doc', content: [
+      ol(1, li(p(t('A')), ol(1, li(p(t('A.a'))), li(p(t('A.b'))))), li(p(t('B')), ol(1, li(p(t('B.a')))))),
+      ol(1, li(p(t('C')), ol(3, li(p(t('C.c'))), li(p(t('C.d')), ol(1, li(p(t('C.d.i')))))))),
+    ] };
+    const zip = await JSZip.loadAsync(await docxBuffer(doc, DEFAULT_SETTINGS, {}));
+    const numbering = await zip.file('word/numbering.xml').async('string');
+    const body = await zip.file('word/document.xml').async('string');
+    // The restarts each numbering instance (w:num) carries, as { level: start }.
+    const restarts = new Map([...numbering.matchAll(/<w:num w:numId="(\d+)">([\s\S]*?)<\/w:num>/g)].map(([, id, xml]) => [
+      id, Object.fromEntries([...xml.matchAll(/<w:lvlOverride w:ilvl="(\d+)">\s*<w:startOverride w:val="(\d+)"\/>/g)].map(([, l, v]) => [l, +v])),
+    ]));
+    // Each list paragraph's text with the level and instance it is numbered with.
+    const paras = [...body.matchAll(/<w:p>([\s\S]*?)<\/w:p>/g)].map(([, xml]) => ({
+      text: /<w:t[^>]*>([^<]*)</.exec(xml)?.[1],
+      level: /<w:ilvl w:val="(\d+)"\/>/.exec(xml)?.[1],
+      num: /<w:numId w:val="(\d+)"\/>/.exec(xml)?.[1],
+    })).filter((x) => x.num);
+    const nested = { 'A.a': ['1', 1], 'B.a': ['1', 1], 'C.c': ['1', 3], 'C.d.i': ['2', 1] };
+    for (const [text, [level, start]] of Object.entries(nested)) {
+      const para = paras.find((x) => x.text === text);
+      expect(para.level).toBe(level);
+      expect(restarts.get(para.num)[level]).toBe(start);
+    }
+    // Separate lists use separate instances; items of one list share theirs.
+    const num = (text) => paras.find((x) => x.text === text).num;
+    expect(num('A.a')).toBe(num('A.b'));
+    expect(new Set(['A', 'A.a', 'B.a', 'C', 'C.c', 'C.d.i'].map(num)).size).toBe(6);
+    expect(restarts.get(num('A'))['0']).toBe(1);
+  });
+
   it('converts relative and absolute CSS font sizes', () => {
     expect(fontSizeToHalfPoints('1.5em')).toBe(36);
     expect(fontSizeToHalfPoints('0.875rem')).toBe(21);
