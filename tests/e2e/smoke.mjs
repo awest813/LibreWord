@@ -177,6 +177,9 @@ await test('find and replace all', async () => {
   const text = await page.evaluate(() => window.libreword.editor.getText());
   assert.equal(text, 'fox dog fox bird fox');
   await page.keyboard.press('Escape');
+  // Closing the panel refocuses the editor on the next frame; wait for it so
+  // the deferred focus can't steal the next test's typing.
+  await page.waitForFunction(() => window.libreword.editor.isFocused);
 });
 
 await test('documents persist across reloads', async () => {
