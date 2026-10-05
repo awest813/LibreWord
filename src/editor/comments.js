@@ -1,5 +1,6 @@
 import { Mark, mergeAttributes } from '@tiptap/core';
-import { TextSelection } from '@tiptap/pm/state';
+import { Fragment, Slice } from '@tiptap/pm/model';
+import { Plugin, PluginKey, Selection } from '@tiptap/pm/state';
 
 /**
  * A comment anchor. The mark only stores the comment id; the comment thread
@@ -48,7 +49,8 @@ export const CommentMark = Mark.create({
         }
         if (dispatch) {
           tr.addMark(from, to, this.type.create({ id }));
-          tr.setSelection(TextSelection.create(tr.doc, to));
+          // `to` may sit between blocks (select all, a selected table): find a valid caret spot.
+          tr.setSelection(Selection.near(tr.doc.resolve(to), -1));
           dispatch(tr);
         }
         return true;
@@ -70,6 +72,32 @@ export const CommentMark = Mark.create({
     };
   },
 
+  addProseMirrorPlugins() {
+    const type = this.type;
+    return [
+      new Plugin({
+        key: new PluginKey('commentPaste'),
+        props: {
+          // A pasted copy of an anchor would give one comment two places in the
+          // text (and commentRanges would span everything between them). Drop
+          // anchors whose comment is still elsewhere in the document; cut or
+          // dragged text no longer is, so those keep their comments.
+          transformPasted(slice, view) {
+            const { doc, selection } = view.state;
+            const live = new Set();
+            const collect = (node) => {
+              for (const m of node.marks) if (m.type === type) live.add(m.attrs.id);
+            };
+            doc.nodesBetween(0, selection.from, collect);
+            doc.nodesBetween(selection.to, doc.content.size, collect);
+            if (!live.size) return slice;
+            return new Slice(stripComments(slice.content, type, live), slice.openStart, slice.openEnd);
+          },
+        },
+      }),
+    ];
+  },
+
   addKeyboardShortcuts() {
     return {
       'Mod-Alt-m': () => {
@@ -79,6 +107,15 @@ export const CommentMark = Mark.create({
     };
   },
 });
+
+function stripComments(fragment, type, ids) {
+  const out = [];
+  fragment.forEach((node) => {
+    if (node.isText) out.push(node.mark(node.marks.filter((m) => m.type !== type || !ids.has(m.attrs.id))));
+    else out.push(node.copy(stripComments(node.content, type, ids)));
+  });
+  return Fragment.fromArray(out);
+}
 
 /** Map of comment id → { from, to } spanning all of its anchored text. */
 export function commentRanges(doc) {

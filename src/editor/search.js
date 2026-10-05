@@ -1,4 +1,5 @@
 import { Extension } from '@tiptap/core';
+import { Fragment } from '@tiptap/pm/model';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import { Decoration, DecorationSet } from '@tiptap/pm/view';
 
@@ -19,10 +20,11 @@ export function buildRegExp(term, { caseSensitive = false, wholeWord = false, re
 }
 
 /**
- * Find all matches in the document. Text is collected per textblock so
- * matches can span differently-formatted text nodes but never paragraphs.
+ * Find all matches in the document. Text is collected per run of text nodes
+ * so matches can span differently-formatted text but never paragraphs or
+ * inline atoms (images, hard breaks) — replacing such a match would delete them.
  */
-export function findMatches(doc, re) {
+export function findMatches(doc, re, limit = MAX_RESULTS) {
   const results = [];
   if (!re) return results;
   let full = false;
@@ -30,40 +32,49 @@ export function findMatches(doc, re) {
     if (full) return false;
     if (!node.isTextblock) return true;
     let text = '';
-    const map = []; // [textOffset, docPos] per text-ish chunk
-    node.forEach((child, offset) => {
-      const childPos = pos + 1 + offset;
-      if (child.isText) {
-        map.push([text.length, childPos, child.text.length]);
-        text += child.text;
-      } else {
-        // Inline atoms (images, hard breaks) act as a separator character.
-        map.push([text.length, childPos, 1]);
-        text += '￼';
+    let start = pos + 1;
+    const search = () => {
+      re.lastIndex = 0;
+      let m;
+      while (!full && text && (m = re.exec(text))) {
+        if (m[0].length === 0) {
+          re.lastIndex++;
+          continue;
+        }
+        results.push({ from: start + m.index, to: start + m.index + m[0].length, match: m });
+        if (results.length >= limit) full = true;
       }
-    });
-    const toDoc = (offset) => {
-      for (let i = map.length - 1; i >= 0; i--) {
-        if (offset >= map[i][0]) return map[i][1] + (offset - map[i][0]);
-      }
-      return pos + 1;
+      text = '';
     };
-    re.lastIndex = 0;
-    let m;
-    while ((m = re.exec(text))) {
-      if (m[0].length === 0) {
-        re.lastIndex++;
-        continue;
-      }
-      results.push({ from: toDoc(m.index), to: toDoc(m.index + m[0].length), match: m });
-      if (results.length >= MAX_RESULTS) {
-        full = true;
-        return false;
-      }
-    }
+    node.forEach((child, offset) => {
+      if (child.isText) {
+        if (!text) start = pos + 1 + offset;
+        text += child.text;
+      } else search();
+    });
+    search();
     return false;
   });
   return results;
+}
+
+/** Expand `$&`, `$1`, `$<name>`… in a replacement for a stored exec() match, like String#replace. */
+export function expandReplacement(m, replacement) {
+  const groups = m.length - 1;
+  return replacement.replace(/\$(?:([$&`'])|(\d\d?)|<([^>]*)>)/g, (all, sym, num, name) => {
+    if (sym === '$') return '$';
+    if (sym === '&') return m[0];
+    if (sym === '`') return m.input.slice(0, m.index);
+    if (sym === "'") return m.input.slice(m.index + m[0].length);
+    if (num) {
+      if (num.length === 2 && +num >= 1 && +num <= groups) return m[+num] ?? '';
+      const n = +num[0];
+      if (n >= 1 && n <= groups) return (m[n] ?? '') + num.slice(1);
+      return all;
+    }
+    if (!m.groups) return all;
+    return m.groups[name] ?? '';
+  });
 }
 
 const emptyState = { term: '', options: {}, results: [], current: -1, decorations: DecorationSet.empty };
@@ -130,7 +141,7 @@ export const Search = Extension.create({
         const s = searchKey.getState(state);
         if (!s.results.length) return false;
         const r = s.results[s.current >= 0 ? s.current : 0];
-        const text = s.options.regex ? r.match[0].replace(buildRegExp(s.term, s.options), replacement) : replacement;
+        const text = s.options.regex ? expandReplacement(r.match, replacement) : replacement;
         if (dispatch) {
           const marks = state.doc.resolve(r.from).marksAcross(state.doc.resolve(r.to)) || [];
           if (text) tr.replaceWith(r.from, r.to, state.schema.text(text, marks));
@@ -143,19 +154,32 @@ export const Search = Extension.create({
       replaceAll: (replacement) => ({ state, tr, dispatch }) => {
         const s = searchKey.getState(state);
         if (!s.results.length) return false;
+        // Highlighting stops at MAX_RESULTS; replacing must not.
+        const results = findMatches(state.doc, buildRegExp(s.term, s.options), Infinity);
         if (dispatch) {
-          const re = buildRegExp(s.term, s.options);
-          for (let i = s.results.length - 1; i >= 0; i--) {
-            const r = s.results[i];
-            const text = s.options.regex ? r.match[0].replace(re, replacement) : replacement;
-            const marks = state.doc.resolve(r.from).marksAcross(state.doc.resolve(r.to)) || [];
-            if (text) tr.replaceWith(r.from, r.to, state.schema.text(text, marks));
-            else tr.delete(r.from, r.to);
+          // One step per paragraph rather than per match: some plugins' cost grows
+          // with the number of steps squared, which froze the tab on large documents.
+          for (let end = results.length; end > 0; ) {
+            const $first = state.doc.resolve(results[end - 1].from);
+            const start = $first.start();
+            let i = end - 1;
+            while (i > 0 && results[i - 1].from >= start) i--;
+            const nodes = [];
+            let cursor = results[i].from;
+            for (const r of results.slice(i, end)) {
+              $first.parent.content.cut(cursor - start, r.from - start).forEach((n) => nodes.push(n));
+              const text = s.options.regex ? expandReplacement(r.match, replacement) : replacement;
+              const marks = state.doc.resolve(r.from).marksAcross(state.doc.resolve(r.to)) || [];
+              if (text) nodes.push(state.schema.text(text, marks));
+              cursor = r.to;
+            }
+            tr.replaceWith(results[i].from, cursor, Fragment.fromArray(nodes));
+            end = i;
           }
           tr.setMeta(searchKey, { type: 'refresh', from: 0 });
           dispatch(tr);
         }
-        return s.results.length;
+        return results.length;
       },
     };
   },

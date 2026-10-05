@@ -130,6 +130,17 @@ function route() {
   return routing;
 }
 
+// Storage events from db.js: a newer LibreWord in another tab upgraded the database,
+// or this tab's upgrade is waiting for older tabs to close.
+window.addEventListener('libreword:db-outdated', () => {
+  toast('LibreWord was updated in another tab. Reload this tab to keep saving.', {
+    type: 'error', timeout: 60000, action: { label: 'Reload', run: () => location.reload() },
+  });
+});
+window.addEventListener('libreword:db-blocked', () => {
+  toast('Close other LibreWord tabs to finish updating.', { timeout: 10000 });
+});
+
 syncThemeColor();
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', syncThemeColor);
 

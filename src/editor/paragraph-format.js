@@ -183,7 +183,9 @@ export const ParagraphFormat = Extension.create({
       Tab: () => {
         if (insideTable()) return false;
         if (this.editor.isActive('listItem') || this.editor.isActive('taskItem')) {
-          return this.editor.commands.increaseIndent();
+          // Even when the item can't be indented (the first one), don't let Tab move focus away.
+          this.editor.commands.increaseIndent();
+          return true;
         }
         if (this.editor.isActive('codeBlock')) return this.editor.commands.insertContent('  ');
         return this.editor.commands.insertContent('\t');

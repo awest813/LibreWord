@@ -13,17 +13,15 @@ export const FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 2
 
 /** The size (in pt) the selection is actually rendered at. */
 export function currentFontSizePt(editor) {
-  const explicit = editor.getAttributes('textStyle').fontSize;
-  if (explicit) {
-    const n = parseFloat(explicit);
-    if (/px$/.test(explicit)) return Math.round(n * 0.75 * 2) / 2;
-    return n;
-  }
+  const explicit = String(editor.getAttributes('textStyle').fontSize || '').trim();
+  // Only pt and px are taken at face value; em, %, keywords… are resolved by the browser.
+  const m = /^(\d*\.?\d+)\s*(pt|px)?$/i.exec(explicit);
+  if (m) return m[2]?.toLowerCase() === 'px' ? Math.round(m[1] * 0.75 * 2) / 2 : +m[1];
   try {
     const { node } = editor.view.domAtPos(editor.state.selection.from);
     const el = node.nodeType === 1 ? node : node.parentElement;
     const px = parseFloat(getComputedStyle(el).fontSize);
-    return Math.round(px * 0.75 * 2) / 2;
+    return Number.isFinite(px) && px > 0 ? Math.round(px * 0.75 * 2) / 2 : 11;
   } catch {
     return 11;
   }
@@ -44,7 +42,7 @@ export function currentFontFamily(editor) {
 const CASES = {
   lower: (s) => s.toLocaleLowerCase(),
   upper: (s) => s.toLocaleUpperCase(),
-  sentence: (s) => s.toLocaleLowerCase().replace(/(^\s*\p{L}|[.!?]\s+\p{L})/gu, (m) => m.toLocaleUpperCase()),
+  sentence: (s) => s.toLocaleLowerCase().replace(/(^\s*\p{L}|[.!?]\s+\p{L})/gmu, (m) => m.toLocaleUpperCase()),
   title: (s) => s.toLocaleLowerCase().replace(/(^|[\s\-–—(["'“‘])(\p{L})/gu, (_m, a, b) => a + b.toLocaleUpperCase()),
   toggle: (s) => [...s].map((c) => (c === c.toLocaleUpperCase() ? c.toLocaleLowerCase() : c.toLocaleUpperCase())).join(''),
 };
@@ -58,17 +56,29 @@ export const WordCommands = Extension.create({
         const { from, to, empty } = state.selection;
         if (empty || !CASES[mode]) return false;
         if (!dispatch) return true;
+        // Change the selection as one string so sentence and title rules see
+        // across formatting ("hel**lo**" → "Hello", not "HelLo").
+        const parts = [];
+        let text = '';
         state.doc.nodesBetween(from, to, (node, pos) => {
-          if (!node.isText) return true;
-          const start = Math.max(from, pos);
-          const end = Math.min(to, pos + node.nodeSize);
-          const slice = node.text.slice(start - pos, end - pos);
-          const next = CASES[mode](slice);
-          if (next !== slice && next.length === slice.length) {
-            tr.replaceWith(start, end, state.schema.text(next, node.marks));
-          }
-          return false;
+          if (node.isText) {
+            const start = Math.max(from, pos);
+            const slice = node.text.slice(start - pos, Math.min(to, pos + node.nodeSize) - pos);
+            parts.push({ start, offset: text.length, slice, marks: node.marks });
+            text += slice;
+          } else if (node.isBlock) {
+            if (text) text += '\n';
+          } else text += node.type.name === 'hardBreak' ? '\n' : '\ufffc';
+          return true;
         });
+        const changed = CASES[mode](text);
+        for (const { start, offset, slice, marks } of parts) {
+          // Rare letters change length when cased (ß → SS); then fall back to per-run changes.
+          const next = changed.length === text.length ? changed.slice(offset, offset + slice.length) : CASES[mode](slice);
+          if (next !== slice && next.length === slice.length) {
+            tr.replaceWith(start, start + slice.length, state.schema.text(next, marks));
+          }
+        }
         dispatch(tr);
         return true;
       },

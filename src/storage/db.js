@@ -33,9 +33,14 @@ const htmlToText = (html = '') => {
 
 let dbPromise;
 
+const notify = (type) => globalThis.dispatchEvent?.(new CustomEvent(type));
+
 export const getDb = () => {
   if (!dbPromise) {
-    dbPromise = openDB(DB_NAME, DB_VERSION, {
+    const forget = () => {
+      if (dbPromise === opening) dbPromise = null;
+    };
+    const opening = openDB(DB_NAME, DB_VERSION, {
       async upgrade(db, oldVersion, _newVersion, tx) {
         if (!db.objectStoreNames.contains('meta')) {
           const meta = db.createObjectStore('meta', { keyPath: 'id' });
@@ -75,12 +80,25 @@ export const getDb = () => {
           db.deleteObjectStore('documents');
         }
       },
+      blocked() {
+        // An older tab is holding the database open and won't let go.
+        notify('libreword:db-blocked');
+      },
       blocking() {
-        // Another tab wants to upgrade; get out of its way.
-        dbPromise?.then((db) => db.close());
-        dbPromise = null;
+        // Another tab (a newer version) wants to upgrade; get out of its way.
+        // This tab can no longer reopen the database, so it needs a reload.
+        opening.then((db) => db.close()).catch(() => {});
+        forget();
+        notify('libreword:db-outdated');
+      },
+      terminated() {
+        // The browser closed the connection (e.g. site data cleared): reopen on next use.
+        forget();
       },
     });
+    dbPromise = opening;
+    // Never cache a failed open: let the next call retry.
+    opening.catch(forget);
   }
   return dbPromise;
 };
@@ -147,7 +165,8 @@ export async function saveDoc(id, { title, json, html, settings, comments, file,
   const contentStore = tx.objectStore('content');
   const [meta, content] = await Promise.all([metaStore.get(id), contentStore.get(id)]);
   if (!meta) {
-    tx.abort();
+    // Deleted (perhaps in another tab). Nothing was written, so just let the transaction finish.
+    await tx.done;
     return false;
   }
   if (title !== undefined) meta.title = title;
