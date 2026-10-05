@@ -59,6 +59,7 @@ const steps = {
 let bad = 0;
 for (const [name, fn] of Object.entries(steps)) {
   const browser = await chromium.launch(LAUNCH);
+  if (!bad && name === Object.keys(steps)[0]) console.log(LAUNCH.headless ? '-- headless --' : '-- headed --');
   const page = await (await browser.newContext()).newPage();
   let died = false;
   browser.on('disconnected', () => { died = true; });
