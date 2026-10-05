@@ -10,19 +10,25 @@ import { chromium } from 'playwright-core';
 import assert from 'node:assert/strict';
 import mammoth from 'mammoth';
 import { Document, Packer, Paragraph, TextRun } from 'docx';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { startPreview, LAUNCH } from './server.mjs';
 
 const { base, stop } = await startPreview();
-const browser = await chromium.launch(LAUNCH);
-const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, acceptDownloads: true });
-const page = await context.newPage();
+// A regular (persistent) profile, as real users have: Chromium 153 crashes
+// reading file handles back from IndexedDB in Playwright's incognito-style
+// contexts.
+const profile = await mkdtemp(join(tmpdir(), 'libreword-files-'));
+const context = await chromium.launchPersistentContext(profile, { ...LAUNCH, viewport: { width: 1400, height: 900 }, acceptDownloads: true });
+const page = context.pages()[0] || await context.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 // A browser crash would otherwise surface as a cascade of "target closed" failures.
-const crashed = (what) => () => { console.error(`\n${what} during “${current}” — is this a full Chromium build? (see tests/e2e/server.mjs)`); stop(); process.exit(1); };
+const crashed = (what) => () => { console.error(`\n${what} during “${current}”`); stop(); process.exit(1); };
 page.on('crash', crashed('The page crashed'));
 const onExit = crashed('The browser exited');
-browser.on('disconnected', onExit);
+context.on('close', onExit);
 
 let failures = 0;
 let current = 'startup';
@@ -247,8 +253,9 @@ await test('no runtime errors', async () => {
   assert.deepEqual(errors, []);
 });
 
-browser.off('disconnected', onExit);
-await browser.close();
+context.off('close', onExit);
+await context.close();
+await rm(profile, { recursive: true, force: true });
 stop();
 console.log(failures ? `\n${failures} failing` : '\nall passing');
 process.exit(failures ? 1 : 0);
