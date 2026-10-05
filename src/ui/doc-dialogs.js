@@ -104,9 +104,9 @@ export function wordCountDialog(app) {
 }
 
 const SHORTCUTS = [
-  ['Save', 'Mod-S'], ['Print / Save as PDF', 'Mod-P'], ['Open', 'Mod-O'], ['Find', 'Mod-F'], ['Replace', 'Mod-H'],
+  ['Save', 'Mod-S'], ['Save As', 'Mod-Shift-S'], ['Print / Save as PDF', 'Mod-P'], ['Open', 'Mod-O'], ['Find', 'Mod-F'], ['Replace', 'Mod-H'],
   ['Go to page', 'Mod-G'], ['Undo', 'Mod-Z'], ['Redo', 'Mod-Y'], ['Bold', 'Mod-B'], ['Italic', 'Mod-I'], ['Underline', 'Mod-U'],
-  ['Strikethrough', 'Mod-Shift-S'], ['Subscript', 'Mod-='], ['Superscript', 'Mod-Shift-+'], ['Grow / shrink font', 'Mod-] / Mod-['],
+  ['Subscript', 'Mod-='], ['Superscript', 'Mod-Shift-+'], ['Grow / shrink font', 'Mod-] / Mod-['],
   ['Change case', 'Shift-F3'], ['Clear character formatting', 'Mod-Space'], ['Insert link', 'Mod-K'],
   ['Align left / center / right / justify', 'Mod-L / E / R / J'], ['Heading 1 – 6', 'Mod-Alt-1 … 6'], ['Normal text', 'Mod-Alt-0'],
   ['Bulleted list', 'Mod-Shift-8'], ['Numbered list', 'Mod-Shift-7'], ['Checklist', 'Mod-Shift-9'],

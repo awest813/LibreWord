@@ -26,6 +26,11 @@
   --radius: 6px;
   --titlebar-h: 48px;
   --font-ui: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+  /* Title bar / backstage nav, ruler and contextual-tab colours. */
+  --chrome-bar: var(--accent);
+  --ruler-bg: #fff;
+  --ruler-margin: #c8c8c8;
+  --contextual: #8a4b00;
   color-scheme: light;
 }
 
@@ -49,6 +54,10 @@
   --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06);
   --danger: #ff6b6b;
   --success: #54b054;
+  --chrome-bar: #1b2b45;
+  --ruler-bg: #333;
+  --ruler-margin: #1e1e1e;
+  --contextual: #f0b46c;
   color-scheme: dark;
 }
 
@@ -73,6 +82,10 @@
     --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06);
     --danger: #ff6b6b;
     --success: #54b054;
+    --chrome-bar: #1b2b45;
+    --ruler-bg: #333;
+    --ruler-margin: #1e1e1e;
+    --contextual: #f0b46c;
     color-scheme: dark;
   }
 }
@@ -128,10 +141,8 @@ button { cursor: pointer; }
 /* ------------------------------------------------------------------ title bar */
 .titlebar {
   height: var(--titlebar-h); display: flex; align-items: center; gap: 8px; padding: 0 8px;
-  background: var(--accent); color: #fff; flex: 0 0 auto; user-select: none;
+  background: var(--chrome-bar); color: #fff; flex: 0 0 auto; user-select: none;
 }
-:root[data-theme='dark'] .titlebar { background: #1b2b45; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .titlebar { background: #1b2b45; } }
 .titlebar .icon-btn { color: #fff; }
 .titlebar .icon-btn:hover { background: rgba(255, 255, 255, 0.14); }
 .titlebar .icon-btn:active { background: rgba(255, 255, 255, 0.22); }
@@ -187,8 +198,7 @@ button { cursor: pointer; }
   content: ''; position: absolute; left: 12px; right: 12px; bottom: 2px; height: 3px; border-radius: 2px; background: var(--accent);
 }
 .ribbon-tab.is-file { color: var(--accent); font-weight: 600; }
-.ribbon-tab.is-contextual { color: #8a4b00; }
-:root[data-theme='dark'] .ribbon-tab.is-contextual { color: #f0b46c; }
+.ribbon-tab.is-contextual { color: var(--contextual); }
 .ribbon-tabs-spacer { flex: 1; }
 .ribbon {
   display: flex; align-items: stretch; gap: 0; padding: 4px 8px; min-height: 96px; overflow-x: auto; overflow-y: hidden;
@@ -338,10 +348,8 @@ button { cursor: pointer; }
   background: color-mix(in srgb, var(--canvas) 85%, transparent); backdrop-filter: blur(6px);
   display: flex; justify-content: center; border-bottom: 1px solid var(--border);
 }
-.ruler-track { position: relative; height: 18px; margin-top: 3px; background: #fff; border-radius: 1px; box-shadow: 0 0 0 1px var(--border-strong); overflow: visible; }
-:root[data-theme='dark'] .ruler-track { background: #333; }
-.ruler-margin { position: absolute; top: 0; bottom: 0; background: #c8c8c8; }
-:root[data-theme='dark'] .ruler-margin { background: #1e1e1e; }
+.ruler-track { position: relative; height: 18px; margin-top: 3px; background: var(--ruler-bg); border-radius: 1px; box-shadow: 0 0 0 1px var(--border-strong); overflow: visible; }
+.ruler-margin { position: absolute; top: 0; bottom: 0; background: var(--ruler-margin); }
 .ruler-ticks { position: absolute; inset: 0; pointer-events: none; }
 .ruler-handle {
   position: absolute; top: -3px; width: 11px; height: 12px; margin-left: -5px; cursor: ew-resize; border: 0; background: transparent; padding: 0;
@@ -480,8 +488,7 @@ button.sb-item:hover { background: var(--surface-hover); }
 /* ------------------------------------------------------------------ backstage & start */
 .backstage { position: fixed; inset: 0; z-index: 50; display: flex; background: var(--bg); animation: slide-in 0.15s ease-out; }
 @keyframes slide-in { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
-.backstage-nav { width: 220px; flex: 0 0 auto; background: var(--accent); color: #fff; display: flex; flex-direction: column; padding: 8px 0; }
-:root[data-theme='dark'] .backstage-nav { background: #1b2b45; }
+.backstage-nav { width: 220px; flex: 0 0 auto; background: var(--chrome-bar); color: #fff; display: flex; flex-direction: column; padding: 8px 0; }
 .backstage-nav button {
   display: flex; align-items: center; gap: 12px; border: 0; background: transparent; color: #fff; text-align: left;
   padding: 10px 20px; font-size: 14px;

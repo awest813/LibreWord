@@ -11,7 +11,7 @@ import {
 } from '../io/file-access.js';
 import { sanitizeHtml } from '../io/import.js';
 import { transformPastedHTML } from '../io/paste.js';
-import { h, toast, debounce, isPopoverOpen, closePopover } from './dom.js';
+import { h, toast, debounce, isPopoverOpen, closePopover, isMac, shortcutLabel } from './dom.js';
 import { icon } from './icons.js';
 import { Ribbon } from './ribbon.js';
 import { FindPanel, NavPane, Ruler } from './panels.js';
@@ -212,11 +212,14 @@ export class EditorScreen {
 
     if (channel) {
       const onMsg = (e) => {
-        if (e.data?.type === 'saved' && e.data.id === this.docId && e.data.tab !== TAB_ID && !this.conflictShown) {
-          this.conflictShown = true;
-          toast('This document was changed in another tab.', {
-            timeout: 10000,
-            action: { label: 'Reload', run: () => this.nav_.onOpenDoc(this.docId, { force: true }) },
+        if (e.data?.type === 'saved' && e.data.id === this.docId && e.data.tab !== TAB_ID && !this.conflict && !this.destroyed) {
+          // Pause autosave so this tab doesn't silently overwrite the other tab's changes.
+          // Saving explicitly (or leaving the document) keeps this tab's version.
+          this.conflict = true;
+          this.setSaveState('conflict');
+          toast('This document was changed in another tab. Reload to see those changes, or Save to keep yours.', {
+            timeout: 15000,
+            action: { label: 'Reload', run: () => !this.destroyed && this.nav_.onOpenDoc(this.docId, { force: true }) },
           });
         }
       };
@@ -228,8 +231,10 @@ export class EditorScreen {
 
   async destroy({ save = true } = {}) {
     if (this.destroyed) return;
-    if (save) await this.flush();
+    // Leaving keeps this tab's version, even over another tab's changes.
+    if (save) await this.flush({ force: true });
     this.destroyed = true;
+    this.closeBackstage?.();
     if (this.speaking) speechSynthesis.cancel();
     closePopover();
     this.cleanups.forEach((fn) => fn());
@@ -260,8 +265,8 @@ export class EditorScreen {
       }
     });
     this.saveStateEl = h('span', { class: 'save-state', 'aria-live': 'polite' });
-    this.undoBtn = btn('undo', 'Undo (Ctrl+Z)', () => this.editor.chain().focus().undo().run());
-    this.redoBtn = btn('redo', 'Redo (Ctrl+Y)', () => this.editor.chain().focus().redo().run());
+    this.undoBtn = btn('undo', `Undo (${shortcutLabel('Mod-Z')})`, () => this.editor.chain().focus().undo().run());
+    this.redoBtn = btn('redo', `Redo (${shortcutLabel(isMac ? 'Mod-Shift-Z' : 'Mod-Y')})`, () => this.editor.chain().focus().redo().run());
     const searchInput = h('input', { type: 'search', placeholder: 'Search', 'aria-label': 'Search in document' });
     searchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -282,7 +287,7 @@ export class EditorScreen {
         html: '<svg width="26" height="26" viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="10" fill="#fff"/><path d="M12 14h4.2l3.3 14.4L23.2 14h3.6l3.7 14.4L33.8 14H38l-5.6 20h-3.9L25 20.6 21.5 34h-3.9z" fill="#185abd"/></svg>',
         onclick: () => this.leaveDocument(() => this.nav_.onHome()),
       }),
-      (this.saveBtn = btn('save', 'Save (Ctrl+S)', () => this.save())),
+      (this.saveBtn = btn('save', `Save (${shortcutLabel('Mod-S')})`, () => this.save())),
       this.undoBtn,
       this.redoBtn,
       h('div', { class: 'doc-title-wrap' }, this.titleInput, this.saveStateEl, (this.fileChip = h('button', { type: 'button', class: 'file-chip', hidden: true, onclick: () => (this.fileDirty ? this.saveToFile() : this.openBackstage('info')) }))),
@@ -333,7 +338,7 @@ export class EditorScreen {
       this.statusWords,
       h('span', { class: 'sb-item sb-optional' }, navigator.language || 'English'),
       h('div', { class: 'sb-spacer' }),
-      btn('focus', 'Focus', () => this.setFocusMode(true)),
+      btn('focus', 'Focus mode', () => this.setFocusMode(true)),
       this.layoutBtns.print,
       this.layoutBtns.web,
       btn('zoomOut', 'Zoom out', () => this.setZoom(this.view.zoom - 0.1)),
@@ -453,7 +458,7 @@ export class EditorScreen {
       this.markFileDirty();
     }
     this.rev++;
-    this.setSaveState('unsaved');
+    this.setSaveState(this.conflict ? 'conflict' : 'unsaved');
     this.queueSave();
     this.statsDebounced();
     this.nav.refresh();
@@ -500,11 +505,12 @@ export class EditorScreen {
 
   setSaveState(state) {
     this.saveState = state;
-    const labels = { saved: 'Saved', saving: 'Saving…', unsaved: 'Editing', error: 'Not saved' };
+    const labels = { saved: 'Saved', saving: 'Saving…', unsaved: 'Editing', error: 'Not saved', conflict: 'Changed in another tab' };
+    const titles = { saved: 'All changes saved in this browser', conflict: 'Autosave is paused. Save to keep this version, or reload to see the other tab’s changes.' };
     this.saveStateEl.textContent = `· ${labels[state]}`;
-    this.saveStateEl.title = state === 'saved' ? 'All changes saved in this browser' : '';
+    this.saveStateEl.title = titles[state] || '';
     // With a linked file, the file's state is what matters; the chip shows it.
-    this.saveStateEl.hidden = Boolean(this.file) && state !== 'error';
+    this.saveStateEl.hidden = Boolean(this.file) && state !== 'error' && state !== 'conflict';
   }
 
   renderFileChip() {
@@ -519,10 +525,10 @@ export class EditorScreen {
     chip.querySelector('.file-chip-name').textContent = name;
     chip.querySelector('.file-chip-state').textContent = state;
     chip.title = this.fileDirty
-      ? `Changes are kept in this browser but not yet in ${name}. Click or press ${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+S to save them to the file.`
+      ? `Changes are kept in this browser but not yet in ${name}. Click or press ${shortcutLabel('Mod-S')} to save them to the file.`
       : `Linked to ${name} on this device. Save writes your changes back to it.`;
     chip.setAttribute('aria-label', `${name}: ${state}`);
-    this.saveStateEl.hidden = this.saveState !== 'error';
+    this.saveStateEl.hidden = this.saveState !== 'error' && this.saveState !== 'conflict';
   }
 
   markFileDirty() {
@@ -556,9 +562,13 @@ export class EditorScreen {
   // ------------------------------------------------------------------ persistence
   queueSave = debounce(() => this.saveNow(false), 700);
 
-  async saveNow(announce = false) {
+  async saveNow(announce = false, { force = false } = {}) {
     this.queueSave.cancel();
     if (this.destroyed || !this.editor) return;
+    if (this.conflict) {
+      if (!force) return;
+      this.conflict = false;
+    }
     if (this.saving) {
       this.saveAgain = true;
       return this.saving;
@@ -569,9 +579,16 @@ export class EditorScreen {
     const preview = state.doc.textBetween(0, Math.min(state.doc.content.size, 1200), ' ', ' ').replace(/\s+/g, ' ').trim().slice(0, 280);
     if (this.words == null) this.updateStats();
     this.saving = saveDoc(this.docId, { json: this.editor.getJSON(), preview, words: this.words, title: this.title, settings: this.settings, comments: this.comments, file: this.fileRecord() })
-      .then(() => {
+      .then((stored) => {
+        if (stored === false) {
+          // The document was deleted (e.g. from another tab): nothing was written.
+          this.setSaveState('error');
+          toast('This document no longer exists in this browser. Use Save a Copy to keep your work.', { type: 'error', timeout: 8000 });
+          return;
+        }
         // Edits made while the write was in flight still need saving.
-        if (this.rev !== rev) {
+        if (this.conflict) this.setSaveState('conflict');
+        else if (this.rev !== rev) {
           this.setSaveState('unsaved');
           this.queueSave();
         } else this.setSaveState('saved');
@@ -641,7 +658,8 @@ export class EditorScreen {
     this.nav_.onOpenDoc(id);
   }
 
-  async flush() {
+  /** Write pending edits now. `force` also writes over a newer save from another tab. */
+  async flush({ force = false } = {}) {
     if (this.destroyed || !this.editor) return;
     for (let i = 0; i < 5; i++) {
       this.queueSave.cancel();
@@ -649,8 +667,8 @@ export class EditorScreen {
         await this.saving;
         continue;
       }
-      if (this.saveState === 'saved') break;
-      await this.saveNow();
+      if (this.saveState === 'saved' || (this.conflict && !force)) break;
+      await this.saveNow(false, { force });
     }
   }
 
@@ -660,7 +678,7 @@ export class EditorScreen {
     this.title = t;
     this.titleInput.value = t;
     this.updateTitle();
-    this.saveNow();
+    return this.saveNow();
   }
 
   updateSettings(partial, { transient = false } = {}) {
@@ -817,8 +835,8 @@ export class EditorScreen {
   async save() {
     this.commitTitle();
     if (this.file) return this.saveToFile();
-    await this.saveNow(false);
-    toast(canSaveToFiles() ? 'Saved in this browser. Use Save As (Ctrl+Shift+S) to save it as a file.' : 'Saved in this browser.', { type: 'success', timeout: 2600 });
+    await this.saveNow(false, { force: true });
+    toast(canSaveToFiles() ? `Saved in this browser. Use Save As (${shortcutLabel('Mod-Shift-S')}) to save it as a file.` : 'Saved in this browser.', { type: 'success', timeout: 2600 });
     return true;
   }
 
@@ -884,7 +902,7 @@ export class EditorScreen {
         this.lossyAcknowledged = true;
       }
       const fileRev = this.fileRev;
-      await this.flush();
+      await this.flush({ force: true });
       const blob = await renderDocumentBlob(this.editor, format, this.fileMeta());
       const lastModified = await writeToHandle(handle, blob);
       this.file = { ...this.file, lastModified };
@@ -1007,7 +1025,7 @@ export class EditorScreen {
   clipboard(kind) {
     this.editor.view.focus();
     const ok = document.execCommand(kind);
-    if (!ok) toast(`Use ${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+${kind === 'cut' ? 'X' : 'C'} to ${kind}.`);
+    if (!ok) toast(`Use ${shortcutLabel(kind === 'cut' ? 'Mod-X' : 'Mod-C')} to ${kind}.`);
   }
 
   async paste(plain) {
@@ -1032,7 +1050,7 @@ export class EditorScreen {
       const text = await navigator.clipboard.readText();
       if (text) view.pasteText(text);
     } catch {
-      toast(`Your browser blocked clipboard access. Press ${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+V to paste.`, { timeout: 4500 });
+      toast(`Your browser blocked clipboard access. Press ${shortcutLabel('Mod-V')} to paste.`, { timeout: 4500 });
     }
   }
 
@@ -1042,7 +1060,7 @@ export class EditorScreen {
       const docs = [...(files || [])].filter((f) => /\.(docx|md|markdown|txt|html?|rtf)$/i.test(f.name));
       if (docs.length && pos != null) {
         // Dropping a document opens it (linked to the file where the browser allows).
-        handleFromDataTransfer(dataTransfer).then((handle) => this.leaveDocument(() => this.nav_.onImport(docs[0], handle?.kind === 'file' ? handle : null)));
+        handleFromDataTransfer(dataTransfer, docs[0]).then((handle) => this.leaveDocument(() => this.nav_.onImport(docs[0], handle?.kind === 'file' ? handle : null)));
         return true;
       }
       return false;
@@ -1116,7 +1134,7 @@ export class EditorScreen {
       now.toLocaleString(),
       now.toLocaleTimeString(),
     ];
-    const list = h('div', { class: 'menu', role: 'listbox', style: { minWidth: '320px' } });
+    const list = h('div', { class: 'menu', role: 'group', 'aria-label': 'Available formats', style: { minWidth: '320px' } });
     const p = openDialog({ title: 'Date and Time', body: list, buttons: [{ label: 'Cancel', value: null }] });
     for (const f of formats) {
       list.append(h('button', {
@@ -1206,6 +1224,7 @@ export class EditorScreen {
     }
   }
 
+  /** The commenter's name, asking once. Resolves to null if the user cancels. */
   async ensureAuthor() {
     if (this.authorName) return this.authorName;
     const r = await promptDialog({
@@ -1213,7 +1232,8 @@ export class EditorScreen {
       fields: [{ name: 'name', label: 'Name', value: '', placeholder: 'Shown on your comments', hint: 'Stored only in this browser.' }],
       confirmLabel: 'Continue',
     });
-    const name = r?.name?.trim() || 'Author';
+    if (!r) return null;
+    const name = r.name?.trim() || 'Author';
     try {
       localStorage.setItem('lw:author', name);
     } catch { /* ignore */ }
@@ -1223,6 +1243,7 @@ export class EditorScreen {
   async addComment() {
     const ed = this.editor;
     const author = await this.ensureAuthor();
+    if (!author) return;
     const id = `c${newId().replace(/-/g, '').slice(0, 12)}`;
     if (!ed.chain().focus().setComment(id).run()) {
       toast('Select some text to comment on.');
@@ -1257,7 +1278,7 @@ export class EditorScreen {
   async replyToComment(id, text) {
     const author = await this.ensureAuthor();
     const c = this.comments[id];
-    if (!c) return;
+    if (!author || !c) return;
     this.updateComment(id, { replies: [...(c.replies || []), { author, initials: initialsOf(author), date: Date.now(), text }] });
   }
 
@@ -1303,7 +1324,8 @@ export class EditorScreen {
 
   // ------------------------------------------------------------------ keyboard
   handleKeydown(e) {
-    if (this.destroyed || document.querySelector('dialog[open]')) return;
+    // The backstage and dialogs handle their own keys.
+    if (this.destroyed || this.closeBackstage || document.querySelector('dialog[open]')) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     if (e.key === 'Escape') {
@@ -1334,6 +1356,8 @@ export class EditorScreen {
       return;
     }
     if (!mod) return;
+    // Link and Go To act on the document, not on the title or search box being typed in.
+    if (['k', 'g'].includes(key) && e.target.matches?.('input, textarea, select')) return;
     const handled = {
       s: () => (e.shiftKey ? this.saveAs() : this.save()),
       p: () => this.print(),

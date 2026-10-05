@@ -49,6 +49,12 @@ const halfPoints = (v) => {
 const onOff = (el) => (el ? !['0', 'false', 'off'].includes(String(val(el)).toLowerCase()) : undefined);
 const parseXml = (text) => (text ? new DOMParser().parseFromString(text, 'application/xml') : null);
 const deep = (el, name) => (el ? [...el.getElementsByTagNameNS('*', name)] : []);
+/** Children named `name`, looking through content controls and custom XML that wrap table rows/cells. */
+const unwrapped = (el, name) => kids(el).flatMap((c) => {
+  if (c.localName === name) return [c];
+  if (c.localName === 'sdt') return unwrapped(kid(c, 'sdtContent'), name);
+  return c.localName === 'customXml' ? unwrapped(c, name) : [];
+});
 
 async function readText(zip, path) {
   const f = zip.file(path);
@@ -514,11 +520,11 @@ class DocxReader {
 
   table(tbl) {
     const grid = kids(kid(tbl, 'tblGrid'), 'gridCol').map((g) => Math.round((twips(wattr(g, 'w')) || 0) / TWIPS_PER_PX));
-    const rows = kids(tbl, 'tr');
+    const rows = unwrapped(tbl, 'tr');
     // Build a cell matrix to turn vMerge runs into rowspans.
     const matrix = rows.map((tr) => {
-      let col = 0;
-      return kids(tr, 'tc').map((tc) => {
+      let col = num(val(kid(kid(tr, 'trPr'), 'gridBefore'))) || 0;
+      return unwrapped(tr, 'tc').map((tc) => {
         const tcPr = kid(tc, 'tcPr');
         const span = num(val(kid(tcPr, 'gridSpan'))) || 1;
         const vm = kid(tcPr, 'vMerge');

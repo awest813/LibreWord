@@ -479,6 +479,61 @@ await test('back up all documents and restore them into a fresh profile', async 
   await ctx3.close();
 });
 
+await test('the File backstage closes when leaving the document', async () => {
+  await page.click('.template-card >> nth=0');
+  await editorReady();
+  await page.click('.ribbon-tab.is-file');
+  await page.waitForSelector('.backstage');
+  await page.evaluate(() => { location.hash = '#/'; });
+  await page.waitForSelector('.template-card');
+  assert.equal(await page.$('.backstage'), null);
+  assert.equal(await page.getAttribute('#app', 'inert'), null);
+});
+
+await test('the open document is renamed, not deleted, from File › Open', async () => {
+  await page.click('.template-card >> nth=0');
+  await editorReady();
+  await page.click('.ribbon-tab.is-file');
+  await page.click('.backstage-nav button:has-text("Open")');
+  const row = '.backstage .doc-row >> nth=0';
+  await page.click(`${row} >> .doc-actions button`);
+  assert.equal(await page.$('.menu-item:has-text("Delete")'), null);
+  await page.click('.menu-item:has-text("Rename")');
+  await page.fill('dialog input', 'Renamed from the list');
+  await page.click('dialog .btn-primary');
+  await page.waitForSelector('.backstage .doc-row:has-text("Renamed from the list")');
+  await page.keyboard.press('Escape');
+  await page.click('.lw-document');
+  await page.keyboard.type('x');
+  await page.evaluate(() => window.libreword.screen.flush());
+  assert.equal(await page.inputValue('.doc-title-input'), 'Renamed from the list');
+  await page.click('.app-logo');
+  await page.waitForSelector('.doc-row:has-text("Renamed from the list")');
+  await page.click('.doc-row:has-text("Renamed from the list")');
+  await editorReady();
+});
+
+await test('a save from another tab pauses autosave instead of overwriting it', async () => {
+  const id = await page.evaluate(() => window.libreword.screen.docId);
+  const other = await context.newPage();
+  other.on('pageerror', (e) => errors.push(e.message));
+  await other.goto(`${BASE}#/doc/${id}`);
+  await other.waitForFunction(() => window.libreword?.editor && !window.libreword.editor.isDestroyed);
+  await other.evaluate(() => window.libreword.editor.commands.setContent('<p>From the other tab</p>'));
+  await other.evaluate(() => window.libreword.screen.flush());
+  await page.waitForSelector('.save-state:has-text("another tab")');
+  await page.click('.lw-document');
+  await page.keyboard.type('more');
+  await sleep(1200); // past the autosave delay
+  await other.reload();
+  await other.waitForFunction(() => window.libreword?.editor && !window.libreword.editor.isDestroyed);
+  assert.equal(await other.evaluate(() => window.libreword.editor.getText()), 'From the other tab');
+  // Saving explicitly keeps this tab's version.
+  await page.keyboard.press('Control+s');
+  await page.waitForSelector('.save-state:has-text("Saved")');
+  await other.close();
+});
+
 await test('no runtime errors', async () => {
   assert.deepEqual(errors, []);
 });

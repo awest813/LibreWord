@@ -1,6 +1,19 @@
 /** Serialize editor JSON to GitHub-flavoured Markdown. */
 
-const escapeText = (s) => s.replace(/([\\`*_[\]#<>|])/g, '\\$1').replace(/^(\s*)([-+]|\d+\.)(\s)/, '$1\\$2$3');
+const escapeText = (s) => s
+  .replace(/([\\`*_~[\]#<>|])/g, '\\$1')
+  .replace(/&(?=#?\w+;)/g, '\\&') // "&lt;" typed as text must not turn into "<"
+  .replace(/^(\s*)([-+]|\d+\.)(\s)/, '$1\\$2$3');
+
+/** A backtick fence longer than any run of backticks inside `text`. */
+const fenceFor = (text, min = 1) => '`'.repeat(Math.max(min, ...(text.match(/`+/g) || []).map((r) => r.length + 1)));
+
+/** Inline code span; backslashes don't escape inside code, so widen the fence instead. */
+function codeSpan(text) {
+  const fence = fenceFor(text);
+  const pad = /^`|`$/.test(text) ? ' ' : '';
+  return `${fence}${pad}${text}${pad}${fence}`;
+}
 
 function inline(nodes = []) {
   let out = '';
@@ -17,7 +30,7 @@ function inline(nodes = []) {
     const marks = n.marks || [];
     const has = (t) => marks.some((m) => m.type === t);
     const code = has('code');
-    let t = code ? `\`${n.text.replace(/`/g, '\\`')}\`` : escapeText(n.text);
+    let t = code ? codeSpan(n.text) : escapeText(n.text);
     if (!code) {
       // Keep surrounding whitespace outside of the emphasis markers.
       const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(t);
@@ -64,7 +77,9 @@ function block(node, ctx) {
       return blocks(node.content, ctx).split('\n').map((l) => (l ? `> ${l}` : '>')).join('\n');
     case 'codeBlock': {
       const lang = node.attrs?.language || '';
-      return `\`\`\`${lang}\n${textOf(node)}\n\`\`\``;
+      const text = textOf(node);
+      const fence = fenceFor(text, 3);
+      return `${fence}${lang}\n${text}\n${fence}`;
     }
     case 'horizontalRule':
       return '---';
@@ -80,7 +95,8 @@ function block(node, ctx) {
           if (node.type === 'orderedList') marker = `${n++}.`;
           if (node.type === 'taskList') marker = `- [${item.attrs?.checked ? 'x' : ' '}]`;
           const body = blocks(item.content, ctx);
-          const indent = ' '.repeat(marker.length + 1);
+          // Task items continue under the text after "- ", not after "[ ]" (that would be a code block).
+          const indent = ' '.repeat(node.type === 'taskList' ? 2 : marker.length + 1);
           return `${marker} ${body.split('\n').map((l, i) => (i === 0 || !l ? l : indent + l)).join('\n')}`;
         })
         .join('\n');

@@ -17,25 +17,30 @@ const EXPORT_HINTS = {
 
 export function openBackstage(app, section = 'info') {
   closePopover();
+  app.closeBackstage?.();
   const close = () => {
+    if (app.closeBackstage !== close) return;
+    app.closeBackstage = null;
     el.remove();
     document.getElementById('app')?.removeAttribute('inert');
     document.removeEventListener('keydown', onKey, true);
-    app.editor?.commands.focus();
+    if (!app.destroyed) app.editor?.commands.focus();
   };
   const onKey = (e) => {
-    if (e.key === 'Escape') {
+    // A dialog opened from the backstage handles its own Escape.
+    if (e.key === 'Escape' && !document.querySelector('dialog[open]')) {
       e.preventDefault();
       e.stopPropagation();
       close();
     }
   };
 
+  const listOptions = { currentId: app.docId, onRenameCurrent: (title) => app.rename(title) };
   const main = h('section', { class: 'backstage-main' });
   const sections = {
-    home: { label: 'Home', icon: 'home', render: () => [h('h1', {}, 'Good to see you'), templateCards({ onTemplate: (t) => { close(); app.leaveDocument(() => app.nav_.onNewDoc(t)); }, onImport: importFile }), documentList({ onOpen: openDoc, compact: true }).el] },
+    home: { label: 'Home', icon: 'home', render: () => [h('h1', {}, 'Good to see you'), templateCards({ onTemplate: (t) => { close(); app.leaveDocument(() => app.nav_.onNewDoc(t)); }, onImport: importFile }), documentList({ onOpen: openDoc, compact: true, ...listOptions }).el] },
     new: { label: 'New', icon: 'newDoc', render: () => [h('h1', {}, 'New'), templateCards({ onTemplate: (t) => { close(); app.leaveDocument(() => app.nav_.onNewDoc(t)); } })] },
-    open: { label: 'Open', icon: 'open', render: () => [h('h1', {}, 'Open'), h('button', { type: 'button', class: 'btn btn-primary', onclick: importFile, html: `${icon('upload')} Browse this device…` }), documentList({ onOpen: openDoc }).el] },
+    open: { label: 'Open', icon: 'open', render: () => [h('h1', {}, 'Open'), h('button', { type: 'button', class: 'btn btn-primary', onclick: importFile, html: `${icon('upload')} Browse this device…` }), documentList({ onOpen: openDoc, ...listOptions }).el] },
     info: { label: 'Info', icon: 'info', render: info },
     save: { label: 'Save', icon: 'save', render: () => { close(); app.save(); return []; } },
     saveAs: { label: 'Save As', icon: 'fileDown', render: () => { close(); app.saveAs(); return []; } },
@@ -170,6 +175,7 @@ export function openBackstage(app, section = 'info') {
   );
   const el = h('div', { class: 'backstage', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'File' }, nav, main);
   document.body.append(el);
+  app.closeBackstage = close;
   // Keep keyboard and screen-reader focus inside the backstage while it's open.
   document.getElementById('app')?.setAttribute('inert', '');
   document.addEventListener('keydown', onKey, true);

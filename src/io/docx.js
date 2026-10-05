@@ -4,6 +4,7 @@ import {
   TextRun, WidthType, Packer, UnderlineType, CommentRangeStart, CommentRangeEnd, CommentReference,
 } from 'docx';
 import { pageGeometry, TWIPS_PER_PX } from '../editor/page-setup.js';
+import { cssLengthToPx } from '../editor/paragraph-format.js';
 
 const HEADINGS = [null, HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3, HeadingLevel.HEADING_4, HeadingLevel.HEADING_5, HeadingLevel.HEADING_6];
 const ALIGN = { left: AlignmentType.LEFT, center: AlignmentType.CENTER, right: AlignmentType.RIGHT, justify: AlignmentType.JUSTIFIED };
@@ -30,9 +31,10 @@ export function cssColorToHex(value) {
 
 export function fontSizeToHalfPoints(value) {
   if (!value) return undefined;
-  const n = parseFloat(value);
-  if (Number.isNaN(n)) return undefined;
-  const pt = /px$/.test(value) ? n * 0.75 : n;
+  const v = String(value).trim();
+  // Bare numbers are points; anything else is a CSS length (px, pt, em, rem…).
+  const pt = /^[\d.]+$/.test(v) ? parseFloat(v) : (cssLengthToPx(v) ?? NaN) * 0.75;
+  if (!(pt > 0)) return undefined;
   return Math.round(pt * 2);
 }
 
@@ -50,24 +52,45 @@ function dataUrlToBytes(src) {
 
 const IMAGE_TYPES = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/gif': 'gif', 'image/bmp': 'bmp' };
 
+/** Decode an image for drawing; createImageBitmap can't decode SVG, so that goes through <img>. */
+async function decodeImage(bytes, mime) {
+  const blob = new Blob([bytes], { type: mime });
+  if (mime !== 'image/svg+xml') return createImageBitmap(blob);
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    return img;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 /** Re-encode anything docx can't embed directly (webp, svg…) as PNG via canvas. */
 async function toEmbeddable(bytes, mime) {
   if (IMAGE_TYPES[mime]) return { bytes, type: IMAGE_TYPES[mime] };
   if (typeof document === 'undefined' || typeof createImageBitmap === 'undefined') return null;
-  const bmp = await createImageBitmap(new Blob([bytes], { type: mime }));
+  const src = await decodeImage(bytes, mime);
+  // An SVG without width/height has no natural size; use the browser's default replaced-element size.
+  const width = src.naturalWidth || src.width || 300;
+  const height = src.naturalHeight || src.height || 150;
   const canvas = document.createElement('canvas');
-  canvas.width = bmp.width;
-  canvas.height = bmp.height;
-  canvas.getContext('2d').drawImage(bmp, 0, 0);
+  canvas.width = width;
+  canvas.height = height;
+  canvas.getContext('2d').drawImage(src, 0, 0, width, height);
+  src.close?.();
   const blob = await new Promise((r) => canvas.toBlob(r, 'image/png'));
-  return { bytes: new Uint8Array(await blob.arrayBuffer()), type: 'png' };
+  return { bytes: new Uint8Array(await blob.arrayBuffer()), type: 'png', width, height };
 }
 
 async function imageSize(bytes, mime) {
   try {
     if (typeof createImageBitmap !== 'undefined') {
       const bmp = await createImageBitmap(new Blob([bytes], { type: mime }));
-      return { width: bmp.width, height: bmp.height };
+      const size = { width: bmp.width, height: bmp.height };
+      bmp.close();
+      return size;
     }
   } catch { /* fall through */ }
   // PNG header fallback (used in tests / non-DOM environments)
@@ -99,7 +122,7 @@ async function collectImages(doc) {
         }
         const embeddable = await toEmbeddable(data.bytes, data.mime);
         if (!embeddable) return;
-        const size = await imageSize(data.bytes, data.mime);
+        const size = embeddable.width ? {} : await imageSize(data.bytes, data.mime);
         images.set(src, { ...embeddable, ...size });
       } catch {
         /* unreachable image — skipped */
@@ -140,6 +163,7 @@ class Converter {
     this.images = images;
     this.geometry = geometry;
     this.listInstance = 0;
+    this.orderedStarts = new Set(); // start numbers other than 1, each needs its own numbering config
     this.textIndex = 0;
     // comment id → { first, last, ids: [numeric docx ids for the thread] }
     this.commentAnchors = commentAnchors;
@@ -292,11 +316,14 @@ class Converter {
       case 'taskList': {
         const level = ctx.listLevel ?? 0;
         const instance = n.type === 'orderedList' ? ++this.listInstance : 0;
+        const start = Number.isInteger(n.attrs?.start) && n.attrs.start >= 0 ? n.attrs.start : 1;
+        if (n.type === 'orderedList' && start !== 1) this.orderedStarts.add(start);
+        const orderedRef = start !== 1 ? `lw-ordered-${start}` : 'lw-ordered';
         const out = [];
         for (const item of n.content || []) {
           const [first, ...rest] = item.content || [];
           const numbering = n.type === 'orderedList'
-            ? { numbering: { reference: 'lw-ordered', level: Math.min(level, 8), instance } }
+            ? { numbering: { reference: orderedRef, level: Math.min(level, 8), instance } }
             : n.type === 'bulletList'
               ? { numbering: { reference: 'lw-bullet', level: Math.min(level, 8) } }
               : { indent: { left: 360 * (level + 1), hanging: 360 } };
@@ -357,6 +384,15 @@ class Converter {
 
 const BULLETS = ['•', '◦', '▪', '•', '◦', '▪', '•', '◦', '▪'];
 const ORDERED_FORMATS = [LevelFormat.DECIMAL, LevelFormat.LOWER_LETTER, LevelFormat.LOWER_ROMAN];
+
+/** Numbered-list definition; `start` sets the first number (docx's instances restart level 0 at it). */
+const orderedNumbering = (reference, start = 1) => ({
+  reference,
+  levels: Array.from({ length: 9 }, (_, level) => ({
+    level, format: ORDERED_FORMATS[level % 3], text: `%${level + 1}.`, alignment: AlignmentType.LEFT, start,
+    style: { paragraph: { indent: { left: 720 * (level + 1), hanging: 360 } } },
+  })),
+});
 
 function headerFooter(text, pageNumbers, isFooter) {
   const children = [];
@@ -478,13 +514,8 @@ export async function buildDocx(json, settings, { title = 'Document', author = '
             style: { paragraph: { indent: { left: 720 * (level + 1), hanging: 360 } } },
           })),
         },
-        {
-          reference: 'lw-ordered',
-          levels: Array.from({ length: 9 }, (_, level) => ({
-            level, format: ORDERED_FORMATS[level % 3], text: `%${level + 1}.`, alignment: AlignmentType.LEFT,
-            style: { paragraph: { indent: { left: 720 * (level + 1), hanging: 360 } } },
-          })),
-        },
+        orderedNumbering('lw-ordered'),
+        ...[...conv.orderedStarts].map((start) => orderedNumbering(`lw-ordered-${start}`, start)),
       ],
     },
     sections: [

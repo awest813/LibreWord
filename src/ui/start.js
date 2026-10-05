@@ -38,7 +38,11 @@ export const pickFile = (accept = IMPORT_ACCEPT) => pickFileInput(accept);
 /**
  * The document list. Returns an element plus a refresh() function.
  */
-export function documentList({ onOpen, compact = false }) {
+/**
+ * The open document (`currentId`) can't be deleted from the list, and renaming it goes
+ * through `onRenameCurrent` so the editor doesn't write the old name back on its next save.
+ */
+export function documentList({ onOpen, compact = false, currentId = null, onRenameCurrent = null }) {
   const wrap = h('div', {});
   const filter = h('input', { type: 'search', placeholder: 'Search documents', 'aria-label': 'Search documents' });
   const more = h('button', { type: 'button', class: 'icon-btn', title: 'Backup & restore', 'aria-label': 'Backup and restore', html: icon('more') });
@@ -82,8 +86,7 @@ export function documentList({ onOpen, compact = false }) {
               { label: 'Open', icon: 'open', run: () => onOpen(d.id) },
               { label: 'Rename…', icon: 'rename', run: () => rename(d) },
               { label: 'Make a copy', icon: 'copy', run: () => duplicate(d) },
-              'separator',
-              { label: 'Delete', icon: 'trash', run: () => remove(d) },
+              ...(d.id === currentId ? [] : ['separator', { label: 'Delete', icon: 'trash', run: () => remove(d) }]),
             ],
             { iconFn: (n) => icon(n) },
           ),
@@ -97,8 +100,10 @@ export function documentList({ onOpen, compact = false }) {
           tabindex: '0',
           onclick: () => onOpen(d.id),
           onkeydown: (e) => {
+            // Keys pressed on the row's own buttons aren't meant for the row.
+            if (e.target !== e.currentTarget) return;
             if (e.key === 'Enter') onOpen(d.id);
-            if (e.key === 'Delete') remove(d);
+            if (e.key === 'Delete' && d.id !== currentId) remove(d);
           },
         },
         h('td', {}, h('div', { class: 'doc-name', html: icon('file') }, h('div', { style: { minWidth: 0 } }, h('strong', {}, d.title || 'Untitled document'), compact ? null : h('small', {}, d.fileName ? `Saves to ${d.fileName}` : d.preview || 'Empty document')))),
@@ -120,7 +125,8 @@ export function documentList({ onOpen, compact = false }) {
   const rename = async (d) => {
     const r = await promptDialog({ title: 'Rename document', fields: [{ name: 'title', label: 'Name', value: d.title }], confirmLabel: 'Rename' });
     if (r && r.title.trim()) {
-      await renameDoc(d.id, r.title.trim());
+      if (d.id === currentId && onRenameCurrent) await onRenameCurrent(r.title.trim());
+      else await renameDoc(d.id, r.title.trim());
       refresh();
     }
   };

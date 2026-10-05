@@ -73,7 +73,7 @@ export class Ribbon {
     this.tabsEl = h('div', { class: 'ribbon-tabs', role: 'tablist', 'aria-label': 'Ribbon' });
     this.bodyEl = h('div', { class: 'ribbon', role: 'tabpanel' });
     // The tablist holds only tabs; the collapse toggle sits beside it.
-    this.collapseBtn = h('button', { type: 'button', class: 'icon-btn ribbon-collapse', title: 'Collapse the ribbon (Ctrl+F1)', 'aria-label': 'Collapse the ribbon', 'aria-expanded': 'true', html: icon('chevronUp') });
+    this.collapseBtn = h('button', { type: 'button', class: 'icon-btn ribbon-collapse', title: `Collapse the ribbon (${shortcutLabel('Mod-F1')})`, 'aria-label': 'Collapse the ribbon', 'aria-expanded': 'true', html: icon('chevronUp') });
     this.collapseBtn.addEventListener('click', () => this.toggleCollapsed());
     this.el.append(h('div', { class: 'ribbon-tabbar' }, this.tabsEl, this.collapseBtn), this.bodyEl);
     this.tabs = this.defineTabs();
@@ -256,7 +256,7 @@ export class Ribbon {
       const chip = (c) => h('button', { type: 'button', class: 'color-chip', style: { background: c }, title: c, 'aria-label': c, onclick: () => { closePopover(); applyColor(c); } });
       if (isText) {
         p.append(
-          h('button', { type: 'button', class: 'menu-item', role: 'menuitem', onclick: () => { closePopover(); this.editor.chain().focus().unsetColor().run(); } }, h('span', { class: 'menu-icon', html: '<span style="display:inline-block;width:14px;height:14px;background:#000;border-radius:2px"></span>' }), h('span', {}, 'Automatic'), h('span')),
+          h('button', { type: 'button', class: 'menu-item', role: 'menuitem', onclick: () => { closePopover(); this.editor.chain().focus().unsetColor().run(); } }, h('span', { class: 'menu-icon', html: '<span style="display:inline-block;width:14px;height:14px;background:currentColor;border-radius:2px"></span>' }), h('span', {}, 'Automatic'), h('span')),
           h('h4', {}, 'Theme colors'),
           h('div', { class: 'color-grid' }, ...THEME_COLORS.flat().map(chip)),
           h('h4', {}, 'Standard colors'),
@@ -684,12 +684,13 @@ export class Ribbon {
 
   renderTabs() {
     this.tabsEl.replaceChildren();
-    const file = h('button', { type: 'button', class: 'ribbon-tab is-file', role: 'tab', 'aria-selected': 'false' }, 'File');
+    // Roving tabindex: Tab reaches the selected tab, arrow keys move between tabs.
+    const file = h('button', { type: 'button', class: 'ribbon-tab is-file', role: 'tab', 'aria-selected': 'false', tabindex: '-1' }, 'File');
     file.addEventListener('click', () => this.app.openBackstage());
     this.tabsEl.append(file);
     this.tabButtons = {};
     for (const t of this.tabs) {
-      const b = h('button', { type: 'button', class: `ribbon-tab${t.contextual ? ' is-contextual' : ''}`, role: 'tab', 'aria-selected': String(t.id === this.current), 'data-tab': t.id }, t.label);
+      const b = h('button', { type: 'button', class: `ribbon-tab${t.contextual ? ' is-contextual' : ''}`, role: 'tab', id: `ribbon-tab-${t.id}`, 'aria-selected': String(t.id === this.current), tabindex: t.id === this.current ? '0' : '-1', 'data-tab': t.id }, t.label);
       b.addEventListener('mousedown', (e) => e.preventDefault());
       b.addEventListener('click', () => this.select(t.id));
       b.addEventListener('dblclick', () => this.toggleCollapsed());
@@ -723,7 +724,10 @@ export class Ribbon {
   select(id) {
     if (this.collapsed) this.toggleCollapsed();
     this.current = id;
-    for (const [tid, b] of Object.entries(this.tabButtons)) b.setAttribute('aria-selected', String(tid === id));
+    for (const [tid, b] of Object.entries(this.tabButtons)) {
+      b.setAttribute('aria-selected', String(tid === id));
+      b.tabIndex = tid === id ? 0 : -1;
+    }
     this.renderBody();
   }
 
@@ -731,6 +735,7 @@ export class Ribbon {
     this.updaters = [];
     const tab = this.tabs.find((t) => t.id === this.current) || this.tabs[0];
     this.bodyEl.dataset.tab = tab.id;
+    this.bodyEl.setAttribute('aria-labelledby', `ribbon-tab-${tab.id}`);
     this.bodyEl.replaceChildren(...tab.build());
     if (this.editor) this.update();
   }

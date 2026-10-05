@@ -43,11 +43,39 @@ export async function markdownToHtml(md) {
   return sanitizeHtml(doc.body.innerHTML);
 }
 
+// \ansicpgN values whose TextDecoder label isn't simply "windows-N".
+const RTF_CODEPAGES = { 932: 'shift_jis', 936: 'gbk', 949: 'euc-kr', 950: 'big5' };
+// cp1252's 0x80–0x9F block, decoded by hand: some TextDecoder builds (Node 22) treat it as Latin-1.
+const CP1252_HIGH = '\u20ac\u0081\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u008d\u017d\u008f'
+  + '\u0090\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u009d\u017e\u0178';
+const cp1252 = (bytes) => bytes.map((b) => (b >= 0x80 && b < 0xa0 ? CP1252_HIGH[b - 0x80] : String.fromCharCode(b))).join('');
+
+/** Byte decoder for the document's \ansicpg code page (cp1252 by default). */
+function rtfDecoder(rtf) {
+  const cp = Number(/\\ansicpg(\d+)/.exec(rtf)?.[1]) || 1252;
+  if (cp !== 1252) {
+    try {
+      const decoder = new TextDecoder(RTF_CODEPAGES[cp] || `windows-${cp}`);
+      return (bytes) => decoder.decode(new Uint8Array(bytes));
+    } catch { /* unknown code page: fall back to cp1252 */ }
+  }
+  return cp1252;
+}
+
 /** Strip a minimal RTF document down to its text (good enough for plain RTF). */
 export function rtfToText(rtf) {
   let depth = 0;
   let skipDepth = -1;
   let out = '';
+  // \'xx escapes are bytes in the document's code page (cp1252 unless \ansicpg says
+  // otherwise); consecutive ones are decoded together so double-byte code pages work.
+  const decode = rtfDecoder(rtf);
+  let bytes = [];
+  const emit = (s) => {
+    if (bytes.length) out += decode(bytes);
+    bytes = [];
+    out += s;
+  };
   for (let i = 0; i < rtf.length; i++) {
     const c = rtf[i];
     if (c === '{') {
@@ -63,19 +91,23 @@ export function rtfToText(rtf) {
       if (!m) continue;
       i += m[0].length - 1;
       if (skipDepth >= 0) continue;
-      if (m[1] === 'par' || m[1] === 'line') out += '\n';
-      else if (m[1] === 'tab') out += '\t';
+      if (m[1] === 'par' || m[1] === 'line') emit('\n');
+      else if (m[1] === 'tab') emit('\t');
       else if (m[1] === 'u' && m[2]) {
-        out += String.fromCharCode(Number(m[2]) < 0 ? Number(m[2]) + 65536 : Number(m[2]));
-        // Skip the ANSI fallback character that follows \uN (\uc1 default).
-        if (rtf[i + 1] && !'\\{}'.includes(rtf[i + 1])) i++;
+        emit(String.fromCharCode(Number(m[2]) < 0 ? Number(m[2]) + 65536 : Number(m[2])));
+        // Skip the ANSI fallback that follows \uN (\uc1 default): a character or a \'xx escape.
+        if (/^\\'[0-9a-f]{2}/i.test(rtf.slice(i + 1, i + 5))) i += 4;
+        else if (rtf[i + 1] && !'\\{}'.includes(rtf[i + 1])) i++;
       }
-      else if (m[3]) out += String.fromCharCode(parseInt(m[3], 16));
-      else if (m[4] && '{}\\'.includes(m[4])) out += m[4];
+      else if (m[3]) bytes.push(parseInt(m[3], 16));
+      else if (m[4] && '{}\\'.includes(m[4])) emit(m[4]);
+      else if (m[4] === '~') emit('\u00a0');
+      else if (m[4] === '_') emit('\u2011');
     } else if (skipDepth < 0 && c !== '\r' && c !== '\n') {
-      out += c;
+      emit(c);
     }
   }
+  emit('');
   return out.replace(/\n{3,}/g, '\n\n').trim();
 }
 

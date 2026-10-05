@@ -20,7 +20,8 @@ export function staticHtml(editor) {
   const toc = `<nav data-toc class="toc"><div class="toc-title">Contents</div>${headings
     .map((h) => `<div class="toc-entry toc-level-${h.level - min + 1}"><span class="toc-text">${escapeHtml(h.text)}</span></div>`)
     .join('')}</nav>`;
-  return html.replace(/<nav[^>]*data-toc[^>]*>\s*<\/nav>/g, toc);
+  // A replacer function, so "$&" or "$'" in a heading stays literal text.
+  return html.replace(/<nav[^>]*data-toc[^>]*>\s*<\/nav>/g, () => toc);
 }
 
 export function standaloneHtml(editor, title, settings) {

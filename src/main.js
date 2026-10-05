@@ -4,7 +4,7 @@ import { importFile } from './io/import.js';
 import { pickFileToOpen, formatOfName, handleFromDataTransfer } from './io/file-access.js';
 import { renderStartScreen } from './ui/start.js';
 import { toast, h } from './ui/dom.js';
-import { toggleTheme } from './ui/theme.js';
+import { toggleTheme, syncThemeColor } from './ui/theme.js';
 
 const root = document.getElementById('app');
 let screen = null; // current EditorScreen
@@ -130,6 +130,9 @@ function route() {
   return routing;
 }
 
+syncThemeColor();
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', syncThemeColor);
+
 window.addEventListener('hashchange', route);
 route();
 
@@ -162,7 +165,7 @@ window.addEventListener('drop', (e) => {
   e.preventDefault();
   const file = e.dataTransfer?.files?.[0];
   // The handle must be requested synchronously, during the drop event.
-  const handlePromise = handleFromDataTransfer(e.dataTransfer);
+  const handlePromise = handleFromDataTransfer(e.dataTransfer, file);
   if (file) handlePromise.then((handle) => importAndOpen(file, handle?.kind === 'file' ? handle : null));
 });
 

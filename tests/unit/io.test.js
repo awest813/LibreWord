@@ -269,3 +269,80 @@ describe('file names', async () => {
     expect(formatOfName('old.rtf')).toBeNull();
   });
 });
+
+describe('io regressions', async () => {
+  const { Editor } = await import('@tiptap/core');
+  const JSZip = (await import('jszip')).default;
+  const { staticHtml } = await import('../../src/io/export.js');
+  const { readDocx } = await import('../../src/io/docx-import.js');
+  const { handleFromDataTransfer } = await import('../../src/io/file-access.js');
+  const li = (...content) => ({ type: 'listItem', content });
+
+  it('only returns a dropped handle that belongs to the wanted file', async () => {
+    const item = (name) => ({ kind: 'file', getAsFileSystemHandle: () => Promise.resolve({ kind: 'file', name }) });
+    const dataTransfer = { items: [item('notes.pdf'), item('report.docx')] };
+    expect((await handleFromDataTransfer(dataTransfer, { name: 'report.docx' }))?.name).toBe('report.docx');
+    expect(await handleFromDataTransfer({ items: [item('notes.pdf')] }, { name: 'report.docx' })).toBeNull();
+    expect(await handleFromDataTransfer(dataTransfer)).toBeNull();
+  });
+
+  it('keeps "$" patterns in TOC headings literal in HTML export', () => {
+    const editor = new Editor({ extensions: buildExtensions(), content: "<nav data-toc></nav><h1>Cost $& and $' here</h1><p>body</p>" });
+    const html = staticHtml(editor);
+    editor.destroy();
+    expect(html).toContain('<span class="toc-text">Cost $&amp; and $&#39; here</span>');
+    expect(html.match(/<nav/g)).toHaveLength(1);
+  });
+
+  it('indents nested task lists so they stay lists', async () => {
+    const doc = { type: 'doc', content: [{ type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: false }, content: [p(t('parent')), { type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: true }, content: [p(t('child'))] }] }] }] }] };
+    const md = jsonToMarkdown(doc);
+    expect(md).toBe('- [ ] parent\n\n  - [x] child\n');
+    const html = await markdownToHtml(md);
+    expect(html).not.toContain('<pre>');
+    expect(html.match(/data-type="taskList"/g)).toHaveLength(2);
+  });
+
+  it('fences code containing backticks', async () => {
+    expect(jsonToMarkdown({ type: 'doc', content: [p(t('a`b', [{ type: 'code' }]))] })).toBe('``a`b``\n');
+    expect(jsonToMarkdown({ type: 'doc', content: [p(t('`x', [{ type: 'code' }]))] })).toBe('`` `x ``\n');
+    expect(await markdownToHtml(jsonToMarkdown({ type: 'doc', content: [p(t('a`b', [{ type: 'code' }]))] }))).toContain('<code>a`b</code>');
+    const md = jsonToMarkdown({ type: 'doc', content: [{ type: 'codeBlock', content: [t('x\n```\ny')] }, p(t('after'))] });
+    expect(md).toBe('````\nx\n```\ny\n````\n\nafter\n');
+    expect(await markdownToHtml(md)).toMatch(/<pre><code>x\n```\ny\n<\/code><\/pre>\s*<p>after<\/p>/);
+  });
+
+  it('escapes tildes and entity-like text', async () => {
+    const md = jsonToMarkdown({ type: 'doc', content: [p(t('&lt; & ~~no~~'))] });
+    expect(md).toBe('\\&lt; & \\~\\~no\\~\\~\n');
+    expect(await markdownToHtml(md)).toBe('<p>&amp;lt; &amp; ~~no~~</p>\n');
+  });
+
+  it('exports ordered lists with their start number', async () => {
+    const doc = { type: 'doc', content: [
+      { type: 'orderedList', attrs: { start: 5 }, content: [li(p(t('five'))), li(p(t('six')))] },
+      { type: 'orderedList', attrs: { start: 1 }, content: [li(p(t('one')))] },
+    ] };
+    const buf = await docxBuffer(doc, DEFAULT_SETTINGS, {});
+    const numbering = await (await JSZip.loadAsync(buf)).file('word/numbering.xml').async('string');
+    expect(numbering).toContain('<w:startOverride w:val="5"/>');
+    const { html } = await readDocx(buf);
+    expect(html).toBe('<ol start="5"><li><p>five</p></li><li><p>six</p></li></ol><ol><li><p>one</p></li></ol>');
+  });
+
+  it('converts relative and absolute CSS font sizes', () => {
+    expect(fontSizeToHalfPoints('1.5em')).toBe(36);
+    expect(fontSizeToHalfPoints('0.875rem')).toBe(21);
+    expect(fontSizeToHalfPoints('12')).toBe(24);
+    expect(fontSizeToHalfPoints('120%')).toBeUndefined();
+    expect(fontSizeToHalfPoints('small')).toBeUndefined();
+  });
+
+  it('decodes RTF bytes in the document code page', () => {
+    const bs = String.fromCharCode(92);
+    const rtf = `{${bs}rtf1${bs}ansi${bs}ansicpg1252 It${bs}'92s ${bs}'93q${bs}'94${bs}~x ${bs}u8220${bs}'93y}`;
+    expect(rtfToText(rtf)).toBe('It\u2019s \u201cq\u201d\u00a0x \u201cy');
+    const sjis = `{${bs}rtf1${bs}ansi${bs}ansicpg932 ${bs}'82${bs}'a0}`;
+    expect(rtfToText(sjis)).toBe('\u3042');
+  });
+});

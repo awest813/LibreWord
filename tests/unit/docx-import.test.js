@@ -68,6 +68,27 @@ describe('docx import edge cases', () => {
     expect(html).toBe('<p>plain<s> struck</s></p>');
   });
 
+  it('keeps table rows and cells wrapped in content controls', async () => {
+    const tc = (text, tcPr = '') => `<w:tc>${tcPr ? `<w:tcPr>${tcPr}</w:tcPr>` : ''}${p(r(text))}</w:tc>`;
+    const sdt = (inner) => `<w:sdt><w:sdtPr/><w:sdtContent>${inner}</w:sdtContent></w:sdt>`;
+    const tbl = `<w:tbl><w:tblGrid><w:gridCol w:w="1500"/><w:gridCol w:w="1500"/></w:tblGrid>
+      <w:tr>${tc('A')}${sdt(tc('B'))}</w:tr>
+      ${sdt(`<w:tr>${tc('C')}${tc('D')}</w:tr>`)}
+      <w:tr><w:trPr><w:gridBefore w:val="1"/></w:trPr>${tc('E')}</w:tr></w:tbl>`;
+    const { html } = await docx(tbl);
+    expect(html).toBe('<table><tbody><tr><td colwidth="100"><p>A</p></td><td colwidth="100"><p>B</p></td></tr>'
+      + '<tr><td colwidth="100"><p>C</p></td><td colwidth="100"><p>D</p></td></tr>'
+      + '<tr><td colwidth="100"><p>E</p></td></tr></tbody></table>');
+  });
+
+  it('matches vertical merges by grid column after gridBefore', async () => {
+    const tc = (text, tcPr = '') => `<w:tc>${tcPr ? `<w:tcPr>${tcPr}</w:tcPr>` : ''}${p(r(text))}</w:tc>`;
+    const tbl = `<w:tbl><w:tr>${tc('A')}${tc('B', '<w:vMerge w:val="restart"/>')}</w:tr>
+      <w:tr><w:trPr><w:gridBefore w:val="1"/></w:trPr>${tc('', '<w:vMerge/>')}</w:tr></w:tbl>`;
+    const { html } = await docx(tbl);
+    expect(html).toContain('<td rowspan="2"><p>B</p></td>');
+  });
+
   it('sanitises font names', async () => {
     const { html } = await docx(p(r('x', '<w:rFonts w:ascii="Evil&quot;;}Font"/>')));
     expect(html).toBe('<p><span style="font-family: EvilFont">x</span></p>');

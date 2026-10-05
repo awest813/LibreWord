@@ -127,8 +127,15 @@ export async function writeToHandle(handle, blob) {
   }
 }
 
-/** Get a FileSystemFileHandle from a drag & drop item (Chromium), if possible. */
-export function handleFromDataTransfer(dataTransfer) {
-  const item = [...(dataTransfer?.items || [])].find((i) => i.kind === 'file');
-  return item?.getAsFileSystemHandle ? item.getAsFileSystemHandle().catch(() => null) : Promise.resolve(null);
+/**
+ * Get the FileSystemFileHandle for `file` from a drag & drop (Chromium), if
+ * possible. Only a handle with the same name is returned, so a multi-file drop
+ * can never link (and later overwrite) a different file.
+ */
+export function handleFromDataTransfer(dataTransfer, file) {
+  const items = [...(dataTransfer?.items || [])].filter((i) => i.kind === 'file' && i.getAsFileSystemHandle);
+  // Handles must be requested synchronously, during the drop event.
+  const pending = items.map((i) => i.getAsFileSystemHandle().catch(() => null));
+  if (!file || !pending.length) return Promise.resolve(null);
+  return Promise.all(pending).then((handles) => handles.find((h) => h?.kind === 'file' && h.name === file.name) || null);
 }

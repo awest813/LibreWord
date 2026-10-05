@@ -1,4 +1,4 @@
-import { h, formatDate, debounce } from './dom.js';
+import { h, formatDate, debounce, shortcutLabel } from './dom.js';
 import { icon } from './icons.js';
 import { commentRanges, commentIdsAt } from '../editor/comments.js';
 import { TextSelection } from '@tiptap/pm/state';
@@ -68,7 +68,7 @@ export class CommentsPane {
     const refocus = focused && { id: focused.closest('.comment-card')?.dataset.id, cls: focused.className, start: focused.selectionStart, end: focused.selectionEnd, value: focused.value };
     this.list.replaceChildren();
     if (!ids.length) {
-      this.list.append(h('div', { class: 'nav-empty' }, 'No comments yet. Select some text and choose New Comment (Ctrl+Alt+M).'));
+      this.list.append(h('div', { class: 'nav-empty' }, `No comments yet. Select some text and choose New Comment (${shortcutLabel('Mod-Alt-M')}).`));
       return;
     }
     for (const id of ids) this.list.append(this.card(this.app.comments[id], ranges.get(id), focusId === id));

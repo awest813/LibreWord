@@ -93,6 +93,7 @@ export class FindPanel {
     this.replaceVisible = v;
     this.replaceRow.hidden = !v;
     this.toggleReplaceBtn.innerHTML = icon(v ? 'chevronDown' : 'chevronRight');
+    this.toggleReplaceBtn.setAttribute('aria-expanded', String(v));
   }
 
   open({ replace = false, term } = {}) {
@@ -103,8 +104,11 @@ export class FindPanel {
     if (term != null) this.findInput.value = term;
     else if (selected && selected.length < 120 && !selected.includes('\n')) this.findInput.value = selected;
     this.search();
-    (replace && this.findInput.value ? this.replaceInput : this.findInput).focus();
-    this.findInput.select();
+    if (replace && this.findInput.value) this.replaceInput.focus();
+    else {
+      this.findInput.focus();
+      this.findInput.select();
+    }
   }
 
   close() {
@@ -257,9 +261,9 @@ export class Ruler {
     this.canvas = h('canvas', { class: 'ruler-ticks', 'aria-hidden': 'true' });
     this.marginL = h('div', { class: 'ruler-margin' });
     this.marginR = h('div', { class: 'ruler-margin' });
-    this.handleL = h('button', { type: 'button', class: 'ruler-handle', title: 'Left Margin', 'aria-label': 'Left margin' });
-    this.handleR = h('button', { type: 'button', class: 'ruler-handle', title: 'Right Margin', 'aria-label': 'Right margin' });
-    this.handleIndent = h('button', { type: 'button', class: 'ruler-handle indent', title: 'Left Indent', 'aria-label': 'Paragraph left indent' });
+    this.handleL = h('button', { type: 'button', class: 'ruler-handle', title: 'Left Margin', 'aria-label': 'Left margin', 'aria-keyshortcuts': 'ArrowLeft ArrowRight' });
+    this.handleR = h('button', { type: 'button', class: 'ruler-handle', title: 'Right Margin', 'aria-label': 'Right margin', 'aria-keyshortcuts': 'ArrowLeft ArrowRight' });
+    this.handleIndent = h('button', { type: 'button', class: 'ruler-handle indent', title: 'Left Indent', 'aria-label': 'Paragraph left indent', 'aria-keyshortcuts': 'ArrowLeft ArrowRight' });
     this.track = h('div', { class: 'ruler-track' }, this.marginL, this.marginR, this.canvas, this.handleL, this.handleR, this.handleIndent);
     this.el = h('div', { class: 'ruler' }, this.track);
     this.drag(this.handleL, 'left');
@@ -267,16 +271,32 @@ export class Ruler {
     this.drag(this.handleIndent, 'indent');
   }
 
+  /** New margins (or indent) after moving a handle `dx` page pixels from `start`, kept in range. */
+  moved(kind, dx, start) {
+    const g = this.app.geometry;
+    if (kind === 'left') return { ...start.margins, left: Math.max(0, Math.min(g.width - start.margins.right - 72, start.margins.left + dx)) };
+    if (kind === 'right') return { ...start.margins, right: Math.max(0, Math.min(g.width - start.margins.left - 72, start.margins.right - dx)) };
+    return Math.max(0, Math.min(g.contentWidth - 48, start.indent + dx));
+  }
+
   drag(handle, kind) {
+    // Arrow keys nudge the handle one ruler step (Shift: four steps), like dragging.
+    handle.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      const snap = usesInches() ? PX_PER_IN / 16 : PX_PER_CM / 4;
+      const dx = (e.key === 'ArrowLeft' ? -1 : 1) * snap * (e.shiftKey ? 4 : 1);
+      const next = this.moved(kind, dx, { margins: { ...this.app.settings.margins }, indent: this.currentIndent() });
+      if (kind === 'indent') this.app.editor.commands.setParagraphIndent({ indent: next });
+      else this.app.updateSettings({ margins: next });
+    });
     handle.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       handle.setPointerCapture(e.pointerId);
       handle.classList.add('is-dragging');
       const startX = e.clientX;
       const zoom = this.app.view.zoom;
-      const g = this.app.geometry;
-      const startMargins = { ...this.app.settings.margins };
-      const startIndent = this.currentIndent();
+      const start = { margins: { ...this.app.settings.margins }, indent: this.currentIndent() };
       const snap = usesInches() ? PX_PER_IN / 16 : PX_PER_CM / 4;
       let pending = null;
       let frame = 0;
@@ -289,16 +309,7 @@ export class Ruler {
         else this.app.updateSettings({ margins: p }, { transient: true });
       };
       const move = (ev) => {
-        const dx = Math.round((ev.clientX - startX) / zoom / snap) * snap;
-        if (kind === 'left') {
-          const left = Math.max(0, Math.min(g.width - startMargins.right - 72, startMargins.left + dx));
-          pending = { ...startMargins, left };
-        } else if (kind === 'right') {
-          const right = Math.max(0, Math.min(g.width - startMargins.left - 72, startMargins.right - dx));
-          pending = { ...startMargins, right };
-        } else {
-          pending = Math.max(0, Math.min(g.contentWidth - 48, startIndent + dx));
-        }
+        pending = this.moved(kind, Math.round((ev.clientX - startX) / zoom / snap) * snap, start);
         if (!frame) frame = requestAnimationFrame(flush);
       };
       const up = () => {
