@@ -12,6 +12,12 @@ export const CommentMark = Mark.create({
   excludes: '', // comments may overlap
   spanning: true,
 
+  addOptions() {
+    // `isKnown(id)`: whether this document has a thread for the comment id. Anchors
+    // pasted in from another document point at threads that don't exist here.
+    return { isKnown: null };
+  },
+
   addAttributes() {
     return {
       id: {
@@ -74,6 +80,7 @@ export const CommentMark = Mark.create({
 
   addProseMirrorPlugins() {
     const type = this.type;
+    const { isKnown } = this.options;
     return [
       new Plugin({
         key: new PluginKey('commentPaste'),
@@ -81,17 +88,23 @@ export const CommentMark = Mark.create({
           // A pasted copy of an anchor would give one comment two places in the
           // text (and commentRanges would span everything between them). Drop
           // anchors whose comment is still elsewhere in the document; cut or
-          // dragged text no longer is, so those keep their comments.
+          // dragged text no longer is, so those keep their comments. Also drop
+          // anchors for comments this document doesn't have.
           transformPasted(slice, view) {
+            const pasted = new Set();
+            slice.content.descendants((node) => {
+              for (const m of node.marks) if (m.type === type) pasted.add(m.attrs.id);
+            });
+            if (!pasted.size) return slice;
+            const drop = new Set(isKnown ? [...pasted].filter((id) => !isKnown(id)) : []);
             const { doc, selection } = view.state;
-            const live = new Set();
             const collect = (node) => {
-              for (const m of node.marks) if (m.type === type) live.add(m.attrs.id);
+              for (const m of node.marks) if (m.type === type && pasted.has(m.attrs.id)) drop.add(m.attrs.id);
             };
             doc.nodesBetween(0, selection.from, collect);
             doc.nodesBetween(selection.to, doc.content.size, collect);
-            if (!live.size) return slice;
-            return new Slice(stripComments(slice.content, type, live), slice.openStart, slice.openEnd);
+            if (!drop.size) return slice;
+            return new Slice(stripComments(slice.content, type, drop), slice.openStart, slice.openEnd);
           },
         },
       }),

@@ -125,6 +125,17 @@ describe('comments', () => {
     const r = commentRanges(e2.state.doc).get('c1');
     expect(r && e2.state.doc.textBetween(r.from, r.to)).toBe('bb');
   });
+
+  it('drops pasted anchors for comments this document does not have', () => {
+    const e = new Editor({ element: document.createElement('div'), extensions: buildExtensions({ isKnownComment: (id) => id === 'c1' }), content: '<p>x</p>' });
+    editors.push(e);
+    e.commands.setTextSelection(2);
+    e.view.pasteHTML('<p><span data-comment-id="c1">aa</span><span data-comment-id="c9">bb</span></p>', new Event('paste'));
+    const ranges = commentRanges(e.state.doc);
+    expect(ranges.has('c1')).toBe(true);
+    expect(ranges.has('c9')).toBe(false);
+    expect(e.state.doc.textContent).toBe('xaabb');
+  });
 });
 
 describe('font size', () => {

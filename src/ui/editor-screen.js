@@ -110,6 +110,7 @@ export class EditorScreen {
       getGeometry: () => (this.view.layout === 'print' ? this.geometry : null),
       onLayout: ({ pageCount }) => this.onLayout(pageCount),
       getPageOf: (pos) => this.pageOfPos(pos),
+      isKnownComment: (id) => Boolean(this.comments?.[id]),
       onUpdate: ({ transaction }) => this.onDocChange(transaction),
       onSelectionUpdate: () => this.onSelectionChange(),
       onTransaction: () => this.scheduleUiUpdate(),

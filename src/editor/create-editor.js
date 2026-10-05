@@ -23,7 +23,7 @@ import { CommentMark } from './comments.js';
  * The extension list is shared by the live editor and by tests, so the
  * schema is defined in exactly one place.
  */
-export function buildExtensions({ getGeometry = () => null, onLayout = () => {}, getPageOf = null } = {}) {
+export function buildExtensions({ getGeometry = () => null, onLayout = () => {}, getPageOf = null, isKnownComment = null } = {}) {
   return [
     StarterKit.configure({
       heading: { levels: [1, 2, 3, 4, 5, 6] },
@@ -53,13 +53,13 @@ export function buildExtensions({ getGeometry = () => null, onLayout = () => {},
     PageBreak,
     TableOfContents.configure({ getPageOf }),
     WordCommands,
-    CommentMark,
+    CommentMark.configure({ isKnown: isKnownComment }),
     Search,
     Pagination.configure({ getGeometry, onLayout }),
   ];
 }
 
-export function createEditor({ element, content, getGeometry, onLayout, getPageOf, onUpdate, onSelectionUpdate, onTransaction, editorProps = {} }) {
+export function createEditor({ element, content, getGeometry, onLayout, getPageOf, isKnownComment, onUpdate, onSelectionUpdate, onTransaction, editorProps = {} }) {
   let editor;
   editor = new Editor({
     element,
@@ -67,6 +67,7 @@ export function createEditor({ element, content, getGeometry, onLayout, getPageO
     extensions: buildExtensions({
       getGeometry,
       getPageOf,
+      isKnownComment,
       onLayout: (info) => {
         onLayout?.(info);
         editor?.emit('pagination', info);
