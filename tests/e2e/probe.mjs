@@ -1,5 +1,8 @@
 // Diagnostic: run each File System Access step in its own browser to see which one kills it.
 import { chromium } from 'playwright-core';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { startPreview, LAUNCH } from './server.mjs';
 
 const { base, stop } = await startPreview();
@@ -58,9 +61,16 @@ const steps = {
 
 let bad = 0;
 for (const [name, fn] of Object.entries(steps)) {
-  const browser = await chromium.launch(LAUNCH);
-  if (!bad && name === Object.keys(steps)[0]) console.log(LAUNCH.headless ? '-- headless --' : '-- headed --');
-  const page = await (await browser.newContext()).newPage();
+  if (name === Object.keys(steps)[0]) console.log(process.env.PERSISTENT ? '-- persistent profile --' : '-- incognito context --');
+  let browser, page;
+  if (process.env.PERSISTENT) {
+    const ctx = await chromium.launchPersistentContext(await mkdtemp(join(tmpdir(), 'lw-probe-')), LAUNCH);
+    browser = { on: (ev, fn) => ctx.on(ev === 'disconnected' ? 'close' : ev, fn), close: () => ctx.close() };
+    page = await ctx.newPage();
+  } else {
+    browser = await chromium.launch(LAUNCH);
+    page = await (await browser.newContext()).newPage();
+  }
   let died = false;
   browser.on('disconnected', () => { died = true; });
   page.on('crash', () => { died = true; });

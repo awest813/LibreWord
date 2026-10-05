@@ -13,8 +13,7 @@ export const CHROME = process.env.CHROME_PATH || (existsSync(PREINSTALLED) ? PRE
 // rather than Playwright's default chrome-headless-shell: the shell leaves out
 // browser features the app relies on (File System Access permissions and
 // file handles stored in IndexedDB crash it).
-// HEADED=1 runs a visible browser (use xvfb-run on a headless machine).
-export const LAUNCH = { ...(CHROME ? { executablePath: CHROME } : { channel: 'chromium' }), headless: !process.env.HEADED };
+export const LAUNCH = CHROME ? { executablePath: CHROME } : { channel: 'chromium' };
 
 const freePort = () =>
   new Promise((resolve, reject) => {

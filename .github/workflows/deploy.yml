@@ -32,14 +32,11 @@ jobs:
       - run: npm run test:a11y
       - run: node tests/e2e/probe.mjs
         continue-on-error: true
-      - run: xvfb-run -a node tests/e2e/probe.mjs
+      - run: node tests/e2e/probe.mjs
         continue-on-error: true
         env:
-          HEADED: 1
-      # Headless Chromium 153 crashes reading file handles back from IndexedDB.
-      - run: xvfb-run -a npm run test:files
-        env:
-          HEADED: 1
+          PERSISTENT: 1
+      - run: npm run test:files
       - uses: actions/upload-pages-artifact@v4
         if: github.event_name != 'pull_request'
         with:
