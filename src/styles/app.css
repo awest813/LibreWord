@@ -178,6 +178,9 @@ button { cursor: pointer; }
 .file-chip.is-dirty { background: #fff; color: #201f1e; border-color: #fff; }
 .file-chip.is-dirty .file-chip-state { color: #a4262c; opacity: 1; font-weight: 600; }
 .backstage-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.about-line { margin-top: 32px; font-size: 12px; color: var(--text-muted); }
+.link-btn { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }
+pre.diagnostics { max-height: 50vh; overflow: auto; font-size: 12px; white-space: pre-wrap; user-select: text; }
 .save-state { font-size: 12px; opacity: 0.85; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
 .titlebar-search {
   display: flex; align-items: center; gap: 6px; height: 32px; width: min(320px, 28vw); padding: 0 10px; border-radius: 4px;

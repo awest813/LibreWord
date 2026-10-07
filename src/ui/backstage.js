@@ -1,11 +1,12 @@
-import { h, closePopover } from './dom.js';
+import { h, closePopover, toast } from './dom.js';
+import { VERSION, BUILD, diagnostics } from '../diagnostics.js';
 import { icon } from './icons.js';
 import { EXPORT_FORMATS } from '../io/export.js';
 import { templateCards, documentList } from './start.js';
 import { pickFileToOpen, canSaveToFiles, FILE_FORMATS } from '../io/file-access.js';
 import { PAGE_SIZES, formatLength } from '../editor/page-setup.js';
 import { listVersions } from '../storage/db.js';
-import { confirmDialog } from './dialog.js';
+import { confirmDialog, openDialog } from './dialog.js';
 
 const EXPORT_HINTS = {
   docx: 'Opens in Microsoft Word, Google Docs, LibreOffice and Pages',
@@ -103,6 +104,22 @@ export function openBackstage(app, section = 'info') {
         h('button', { type: 'button', class: 'btn', onclick: () => { close(); app.headerFooterDialog(); } }, 'Header & Footer…'),
         h('button', { type: 'button', class: 'btn', onclick: () => { close(); app.wordCountDialog(); } }, 'Word Count…'),
         h('button', { type: 'button', class: 'btn', onclick: () => { close(); app.shortcutsDialog(); } }, 'Keyboard Shortcuts'),
+      ),
+      h('p', { class: 'about-line' },
+        `LibreWord ${VERSION} · build ${BUILD} · `,
+        h('button', {
+          type: 'button',
+          class: 'link-btn',
+          onclick: async () => {
+            const text = await diagnostics(app);
+            try {
+              await navigator.clipboard.writeText(text);
+              toast('Copied. Paste it into your bug report; it contains no document text.', { type: 'success', timeout: 5000 });
+            } catch {
+              openDialog({ title: 'Details for a bug report', body: h('pre', { class: 'diagnostics' }, text) });
+            }
+          },
+        }, 'Copy details for a bug report'),
       ),
     ];
   }

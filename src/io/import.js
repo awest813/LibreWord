@@ -248,7 +248,12 @@ export async function importDocx(arrayBuffer) {
     return { ...result, html: sanitizeHtml(result.html) };
   } catch (err) {
     console.warn('Native .docx import failed, falling back to mammoth', err);
-    return { html: await docxToHtml(arrayBuffer), settings: {}, comments: {}, title: '' };
+    try {
+      return { html: await docxToHtml(arrayBuffer), settings: {}, comments: {}, title: '' };
+    } catch (fallbackErr) {
+      console.warn('mammoth could not read it either', fallbackErr);
+      throw Object.assign(new Error('This file isn’t a Word document, or it’s damaged.'), { code: 'not-docx' });
+    }
   }
 }
 
@@ -310,6 +315,6 @@ export async function importFile(file) {
     case 'txt':
       return { title, html: preserveSpaces(textToHtml(decodeText(await file.arrayBuffer()))) };
     default:
-      throw new Error(NOT_SUPPORTED[ext] || `LibreWord can’t open .${ext || '?'} files. It opens Word (.docx, .doc), OpenDocument (.odt), RTF, Markdown, HTML and text files.`);
+      throw Object.assign(new Error(NOT_SUPPORTED[ext] || `LibreWord can’t open .${ext || '?'} files. It opens Word (.docx, .doc), OpenDocument (.odt), RTF, Markdown, HTML and text files.`), { code: 'unsupported' });
   }
 }

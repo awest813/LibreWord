@@ -6,7 +6,9 @@ import { renderStartScreen } from './ui/start.js';
 import { toast, h } from './ui/dom.js';
 import { toggleTheme, syncThemeColor } from './ui/theme.js';
 import { initInstall, isChromeOS } from './ui/install.js';
+import { watchErrors, noteError } from './diagnostics.js';
 
+watchErrors();
 const root = document.getElementById('app');
 let screen = null; // current EditorScreen
 let routing = Promise.resolve();
@@ -62,7 +64,10 @@ async function importAndOpen(file, handle = null, { show = true } = {}) {
     if (show) toast(openedMessage(file.name, link, handle), { type: 'success', timeout: link ? 4000 : 7000 });
     return open(id);
   } catch (err) {
-    console.error(err);
+    // Readers mark the problems they explain (wrong or damaged file) with a code; anything else is a bug.
+    if (err?.code) console.warn(err);
+    else console.error(err);
+    noteError(err, `opening ${extOf(file.name) || 'file'}`);
     toast(`${file.name}: ${err.message || 'Could not open that file.'}`, { type: 'error', timeout: 6000 });
     return null;
   }
@@ -153,6 +158,7 @@ function route() {
     else await showStart();
   }).catch((err) => {
     console.error(err);
+    noteError(err, 'route');
     toast(`Something went wrong: ${err.message || err}`, { type: 'error', timeout: 8000 });
   });
   return routing;

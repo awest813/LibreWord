@@ -11,6 +11,7 @@ import {
 } from '../io/file-access.js';
 import { sanitizeHtml, canOpen } from '../io/import.js';
 import { commentRanges } from '../editor/comments.js';
+import { noteError } from '../diagnostics.js';
 import { h, toast, debounce, isPopoverOpen, closePopover, isMac, shortcutLabel, setFocusFallback } from './dom.js';
 import { icon } from './icons.js';
 import { Ribbon } from './ribbon.js';
@@ -700,6 +701,7 @@ export class EditorScreen {
       })
       .catch((err) => {
         console.error(err);
+        noteError(err, 'autosave');
         this.setSaveState('error');
         toast(`Couldn't save: ${err.message || err}`, { type: 'error', timeout: 6000 });
       })
@@ -1037,6 +1039,7 @@ export class EditorScreen {
     this.fileSaving = run()
       .catch((err) => {
         console.error(err);
+        noteError(err, `saving to ${this.file?.format || 'file'}`);
         toast(`Couldn't save “${this.file?.name}”: ${err.message || err}`, { type: 'error', timeout: 6000 });
         return false;
       })

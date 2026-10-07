@@ -45,7 +45,7 @@ const attr = (el, ns, name) => el?.getAttributeNS(NS[ns], name) ?? null;
 const is = (el, ns, name) => el.namespaceURI === NS[ns] && el.localName === name;
 const parseXml = (text) => {
   const doc = new DOMParser().parseFromString(text, 'application/xml');
-  if (doc.getElementsByTagName('parsererror').length) throw new Error('This OpenDocument file is damaged.');
+  if (doc.getElementsByTagName('parsererror').length) throw Object.assign(new Error('This OpenDocument file is damaged.'), { code: 'corrupt' });
   return doc;
 };
 
@@ -529,10 +529,10 @@ export async function readOdt(arrayBuffer) {
     const mimetype = (await zip.file('mimetype')?.async('string'))?.trim();
     if (mimetype && !/opendocument\.text/.test(mimetype)) {
       const kind = /spreadsheet/.test(mimetype) ? 'a spreadsheet' : /presentation/.test(mimetype) ? 'a presentation' : /graphics|drawing/.test(mimetype) ? 'a drawing' : 'not a text document';
-      throw new Error(`This OpenDocument file is ${kind}, not a text document.`);
+      throw Object.assign(new Error(`This OpenDocument file is ${kind}, not a text document.`), { code: 'not-text' });
     }
     const text = await zip.file('content.xml')?.async('string');
-    if (!text) throw new Error('This file is not an OpenDocument text document.');
+    if (!text) throw Object.assign(new Error('This file is not an OpenDocument text document.'), { code: 'not-odt' });
     content = parseXml(text);
     const s = await zip.file('styles.xml')?.async('string');
     if (s) styles = parseXml(s);
@@ -545,7 +545,7 @@ export async function readOdt(arrayBuffer) {
     }));
   } else {
     content = parseXml(new TextDecoder().decode(bytes));
-    if (!content.documentElement || content.documentElement.namespaceURI !== NS.office) throw new Error('This file is not an OpenDocument text document.');
+    if (!content.documentElement || content.documentElement.namespaceURI !== NS.office) throw Object.assign(new Error('This file is not an OpenDocument text document.'), { code: 'not-odt' });
   }
   const root = content.documentElement;
   const sheet = new StyleSheet();
@@ -563,7 +563,7 @@ export async function readOdt(arrayBuffer) {
     }
   }
   const body = kid(kid(root, 'office', 'body'), 'office', 'text');
-  if (!body) throw new Error('This OpenDocument file has no text body.');
+  if (!body) throw Object.assign(new Error('This OpenDocument file has no text body.'), { code: 'not-text' });
   const reader = new OdtReader(sheet, files);
   let html = reader.blocks(kids(body));
   if (reader.notes.length) {

@@ -1036,7 +1036,7 @@ export function rtfToHtml(rtf) {
     binary = true;
   }
   src = String(src ?? '').replace(/^\uFEFF/, '');
-  if (!/^\s*\{\\rtf/.test(src)) throw new Error('This file is not in Rich Text Format.');
+  if (!/^\s*\{\\rtf/.test(src)) throw Object.assign(new Error('This file is not in Rich Text Format.'), { code: 'not-rtf' });
   const reader = new RtfReader(src);
   reader.binary = binary;
   try {
