@@ -5,18 +5,18 @@
  *
  * Uses playwright-core with a system Chromium (set CHROME_PATH to override).
  */
-import { chromium } from 'playwright-core';
 import { readFile } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import assert from 'node:assert/strict';
 import mammoth from 'mammoth';
 import JSZip from 'jszip';
 
-import { startPreview, LAUNCH } from './server.mjs';
+import { startPreview } from './server.mjs';
+import { createSuite, launch } from './harness.mjs';
 
 const { base: BASE, stop } = await startPreview();
 
-const browser = await chromium.launch(LAUNCH);
+const browser = await launch();
 const context = await browser.newContext({ viewport: { width: 1400, height: 950 }, acceptDownloads: true });
 const page = await context.newPage();
 // This suite covers the file-input fallback used by Firefox and Safari; saving
@@ -25,23 +25,18 @@ await page.addInitScript(() => {
   delete window.showOpenFilePicker;
   delete window.showSaveFilePicker;
 });
-const errors = [];
-page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => {
-  if (m.type() === 'error') errors.push(m.text());
+const { test, noteError, finish } = createSuite(import.meta.url, {
+  page,
+  // For --grep: start the selected tests in a fresh blank document.
+  setup: async () => {
+    await page.goto(BASE);
+    await page.click('.template-card');
+    await page.waitForFunction(() => window.libreword?.editor && !window.libreword.editor.isDestroyed);
+  },
 });
 
-let failures = 0;
-async function test(name, fn) {
-  try {
-    await fn();
-    console.log(`  ✓ ${name}`);
-  } catch (err) {
-    failures++;
-    console.log(`  ✗ ${name}\n    ${String(err.message).split('\n').slice(0, 14).join('\n    ')}`);
-  }
-}
-
+const saved = () => page.waitForFunction(() => window.libreword.screen.saveState === 'saved');
+const focusInDocument = () => page.waitForFunction(() => window.libreword.screen.editorEl.contains(document.activeElement));
 const editorReady = () => page.waitForFunction(() => window.libreword?.editor && !window.libreword.editor.isDestroyed);
 const settle = () => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r)))));
 
@@ -184,8 +179,7 @@ await test('find and replace all', async () => {
   await page.evaluate(() => window.libreword.editor.commands.setContent('<p>cat dog cat bird CAT</p>'));
   await page.keyboard.press('Control+h');
   await page.fill('.find-panel input[aria-label="Find"]', 'cat');
-  await sleep(250);
-  assert.equal((await page.textContent('.find-count')).trim(), '1 of 3');
+  await page.waitForFunction(() => document.querySelector('.find-count')?.textContent.trim() === '1 of 3');
   await page.fill('.find-panel input[aria-label="Replace with"]', 'fox');
   await page.click('.find-panel button:has-text("All")');
   const text = await page.evaluate(() => window.libreword.editor.getText());
@@ -201,7 +195,7 @@ await test('documents persist across reloads', async () => {
   await page.fill('.doc-title-input', 'Persistence test');
   await page.press('.doc-title-input', 'Enter');
   await page.keyboard.press('Control+s');
-  await sleep(300);
+  await saved();
   await page.reload();
   await editorReady();
   const text = await page.evaluate(() => window.libreword.editor.getText());
@@ -354,8 +348,8 @@ await test('layout stays valid when zoomed', async () => {
 
 await test('table of contents lists headings with page numbers', async () => {
   await page.evaluate(() => window.libreword.editor.commands.setContent('<nav data-toc></nav><h1>One</h1><p>x</p><div data-page-break></div><h1>Two</h1><h2>Two point one</h2>'));
-  await page.waitForFunction(() => document.querySelectorAll('.toc-entry').length === 3);
-  await sleep(400);
+  // Page numbers fill in once pagination has run.
+  await page.waitForFunction(() => [...document.querySelectorAll('.toc-entry .toc-page')].map((e) => e.textContent).join() === '1,2,2');
   const entries = await page.$$eval('.toc-entry', (els) => els.map((e) => `${e.querySelector('.toc-text').textContent}:${e.querySelector('.toc-page').textContent}`));
   assert.deepEqual(entries, ['One:1', 'Two:2', 'Two point one:2']);
 });
@@ -382,7 +376,7 @@ await test('comments: add, reply, resolve, persist and export', async () => {
   assert.equal(await page.inputValue('.comment-reply-input'), '');
   assert.match(await page.evaluate(() => window.libreword.editor.getHTML()), /<span data-comment-id="[^"]+" class="lw-comment">review<\/span>/);
   await page.keyboard.press('Control+s');
-  await sleep(300);
+  await saved();
   await page.reload();
   await editorReady();
   await page.waitForSelector('.comment-card');
@@ -420,7 +414,7 @@ await test('review regressions: drafts, clear formatting, go to page', async () 
   await page.evaluate(() => window.libreword.editor.commands.focus('end'));
   await settle();
   await page.keyboard.type(' more');
-  await sleep(400);
+  await sleep(400); // deliberately: give the comments pane time to re-render, which must keep the draft
   assert.equal(await page.inputValue('.comment-card textarea'), 'half-written draft');
   assert.match(await page.evaluate(() => window.libreword.editor.getText()), /delta\. more$/);
   await page.click('.comment-card .btn-primary');
@@ -446,7 +440,7 @@ await test('version history restores the pre-edit state', async () => {
   const original = await page.evaluate(() => window.libreword.editor.getText());
   await page.evaluate(() => window.libreword.editor.commands.setContent('<p>Completely rewritten.</p>'));
   await page.keyboard.press('Control+s');
-  await sleep(400);
+  await saved();
   await page.click('.ribbon-tab.is-file');
   await page.click('.backstage-nav button:has-text("Version History")');
   await page.waitForSelector('.version-row');
@@ -463,7 +457,7 @@ await test('version history restores the pre-edit state', async () => {
 await test('documents from LibreWord v1 are migrated', async () => {
   const ctx2 = await browser.newContext();
   const p2 = await ctx2.newPage();
-  p2.on('pageerror', (e) => errors.push(e.message));
+  p2.on('pageerror', (e) => noteError(`page error (second tab): ${e.message}`));
   await p2.goto(`${BASE}favicon.svg`); // same origin, app not loaded
   await p2.evaluate(() => new Promise((resolve, reject) => {
     const req = indexedDB.open('libreword', 1);
@@ -538,7 +532,7 @@ await test('the open document is renamed, not deleted, from File › Open', asyn
 await test('a save from another tab pauses autosave instead of overwriting it', async () => {
   const id = await page.evaluate(() => window.libreword.screen.docId);
   const other = await context.newPage();
-  other.on('pageerror', (e) => errors.push(e.message));
+  other.on('pageerror', (e) => noteError(`page error (second tab): ${e.message}`));
   await other.goto(`${BASE}#/doc/${id}`);
   await other.waitForFunction(() => window.libreword?.editor && !window.libreword.editor.isDestroyed);
   await other.evaluate(() => window.libreword.editor.commands.setContent('<p>From the other tab</p>'));
@@ -546,7 +540,7 @@ await test('a save from another tab pauses autosave instead of overwriting it', 
   await page.waitForSelector('.save-state:has-text("another tab")');
   await page.click('.lw-document');
   await page.keyboard.type('more');
-  await sleep(1200); // past the autosave delay
+  await sleep(1200); // deliberately past the autosave delay: nothing may be saved while paused
   await other.reload();
   await other.waitForFunction(() => window.libreword?.editor && !window.libreword.editor.isDestroyed);
   assert.equal(await other.evaluate(() => window.libreword.editor.getText()), 'From the other tab');
@@ -565,7 +559,7 @@ await test('leaving an untouched tab does not overwrite another tab’s save', a
   await page.evaluate(() => window.libreword.screen.flush());
   const id = await page.evaluate(() => window.libreword.screen.docId);
   const other = await context.newPage();
-  other.on('pageerror', (e) => errors.push(e.message));
+  other.on('pageerror', (e) => noteError(`page error (second tab): ${e.message}`));
   await other.goto(`${BASE}#/doc/${id}`);
   await other.waitForFunction(() => window.libreword?.editor && !window.libreword.editor.isDestroyed);
   await other.evaluate(() => window.libreword.editor.commands.setContent('<p>edited in the other tab</p>'));
@@ -817,6 +811,26 @@ await test('copy and paste within LibreWord keeps styles, checklists and page br
   assert.equal(await page.evaluate(() => window.libreword.editor.getText().includes('☒')), false);
 });
 
+await test('File › Info copies bug-report details without the document text', async () => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(BASE).origin });
+  await page.evaluate(() => {
+    window.libreword.editor.commands.setContent('<h1>Secret plans</h1><p>Private words here</p>');
+    window.dispatchEvent(new ErrorEvent('error', { error: new Error('diagnostics test error'), message: 'diagnostics test error', filename: location.href }));
+  });
+  await page.click('.ribbon-tab.is-file');
+  await page.click('.backstage-nav button:has-text("Info")');
+  assert.match(await page.textContent('.about-line'), /LibreWord \d+\.\d+\.\d+ · build /);
+  await page.click('.about-line .link-btn');
+  await page.waitForSelector('.toast:has-text("Copied")');
+  const report = await page.evaluate(() => navigator.clipboard.readText());
+  assert.match(report, /^LibreWord \d/);
+  assert.match(report, /Document: .*words/);
+  assert.match(report, /Content: .*heading 1/);
+  assert.match(report, /diagnostics test error/);
+  assert.doesNotMatch(report, /Secret plans|Private words/);
+  await page.keyboard.press('Escape');
+});
+
 await test('table shading colours the cell and exports it', async () => {
   await page.evaluate(() => {
     const ed = window.libreword.editor;
@@ -839,15 +853,13 @@ await test('menus and dialogs give focus back to the document', async () => {
   await page.click('.ribbon-tab[data-tab="layout"]');
   await page.click('button:has-text("Margins")');
   await page.click('.popover .margin-option >> nth=1');
-  await sleep(50);
-  assert.equal(await page.evaluate(() => window.libreword.screen.editorEl.contains(document.activeElement)), true);
+  await focusInDocument();
   await page.click('button:has-text("Size")');
   await page.click('.popover .menu-item:has-text("Page Setup")');
   await page.waitForSelector('dialog[open]');
   await page.keyboard.press('Escape');
   await page.waitForSelector('dialog[open]', { state: 'detached' });
-  await sleep(50);
-  assert.equal(await page.evaluate(() => window.libreword.screen.editorEl.contains(document.activeElement)), true);
+  await focusInDocument();
 });
 
 await test('keyboard: Ctrl+Alt+0 sets Normal text, F6 reaches the ribbon and back', async () => {
@@ -874,7 +886,7 @@ await test('find & replace: one-by-one stops after a full pass; bad patterns say
   await page.keyboard.press('Control+h');
   await page.fill('.find-panel input >> nth=0', 'cat');
   await page.fill('.find-panel input >> nth=1', 'cats');
-  await sleep(200);
+  await page.waitForFunction(() => / of 4$/.test(document.querySelector('.find-count')?.textContent.trim()));
   // Selects the first match, then replaces one per click until it says it's done.
   for (let i = 0; i < 12 && !(await page.isVisible('.toast:has-text("Done. Replaced 4")')); i++) {
     await page.click('.find-panel button:has-text("Replace")');
@@ -899,11 +911,6 @@ await test('find & replace fits a phone screen', async () => {
   await page.setViewportSize({ width: 1400, height: 950 });
 });
 
-await test('no runtime errors', async () => {
-  assert.deepEqual(errors, []);
-});
-
 await browser.close();
 stop();
-console.log(failures ? `\n${failures} failing` : '\nall passing');
-process.exit(failures ? 1 : 0);
+process.exit(finish());

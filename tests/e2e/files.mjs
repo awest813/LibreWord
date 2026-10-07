@@ -15,35 +15,24 @@ import { readFileSync } from 'node:fs';
 import JSZip from 'jszip';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { startPreview, LAUNCH } from './server.mjs';
+import { startPreview } from './server.mjs';
+import { createSuite, launchOptions } from './harness.mjs';
 
 const { base, stop } = await startPreview();
 // A regular (persistent) profile, as real users have: Chromium 153 crashes
 // reading file handles back from IndexedDB in Playwright's incognito-style
 // contexts.
 const profile = await mkdtemp(join(tmpdir(), 'libreword-files-'));
-const context = await chromium.launchPersistentContext(profile, { ...LAUNCH, viewport: { width: 1400, height: 900 }, acceptDownloads: true });
+const context = await chromium.launchPersistentContext(profile, { ...launchOptions(), viewport: { width: 1400, height: 900 }, acceptDownloads: true });
 const page = context.pages()[0] || await context.newPage();
-const errors = [];
-page.on('pageerror', (e) => errors.push(e.message));
+// For --grep: start on the start screen.
+const suite = createSuite(import.meta.url, { page, setup: async () => { await page.goto(base); await page.waitForSelector('.template-card'); } });
+const { test, finish } = suite;
 // A browser crash would otherwise surface as a cascade of "target closed" failures.
-const crashed = (what) => () => { console.error(`\n${what} during “${current}”`); stop(); process.exit(1); };
+const crashed = (what) => () => { console.error(`\n${what} during “${suite.current}”`); stop(); process.exit(1); };
 page.on('crash', crashed('The page crashed'));
 const onExit = crashed('The browser exited');
 context.on('close', onExit);
-
-let failures = 0;
-let current = 'startup';
-async function test(name, fn) {
-  current = name;
-  try {
-    await fn();
-    console.log(`  ✓ ${name}`);
-  } catch (err) {
-    failures++;
-    console.log(`  ✗ ${name}\n    ${String(err.message).split('\n').slice(0, 12).join('\n    ')}`);
-  }
-}
 
 const sourceDocx = await Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph({ children: [new TextRun('Original text from disk')] })] }] }));
 
@@ -377,13 +366,8 @@ await test('unsupported files say what to do instead', async () => {
   await page.waitForSelector('.toast:has-text("PDF files can’t be edited")');
 });
 
-await test('no runtime errors', async () => {
-  assert.deepEqual(errors, []);
-});
-
 context.off('close', onExit);
 await context.close();
 await rm(profile, { recursive: true, force: true });
 stop();
-console.log(failures ? `\n${failures} failing` : '\nall passing');
-process.exit(failures ? 1 : 0);
+process.exit(finish());

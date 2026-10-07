@@ -10,6 +10,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:watch": "vitest",
+    "test:all": "vitest run && vite build && node tests/e2e/smoke.mjs && node tests/e2e/a11y.mjs && node tests/e2e/files.mjs",
     "test:e2e": "node tests/e2e/smoke.mjs",
     "bench": "node tests/e2e/bench.mjs",
     "icons": "node scripts/generate-icons.mjs",

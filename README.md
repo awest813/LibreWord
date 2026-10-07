@@ -77,14 +77,27 @@ The included workflow (`.github/workflows/deploy.yml`) runs the tests and publis
 ## Testing
 
 ```bash
-npm test                             # unit tests (Vitest): converters, search & replace, editing commands
+npm run test:all                     # everything below except the benchmark, in order (builds first)
+npm test                             # unit tests (Vitest): converters, file formats, paste, editing commands
+npm run test:watch                   # unit tests, re-run on change
 npm run build && npm run test:e2e    # end-to-end tests in Chromium
+npm run build && npm run test:files  # opening and saving files on the device (.docx, .odt, .rtf, .doc, text)
+npm run build && npm run test:a11y   # axe-core accessibility audit of every screen and ribbon menu
 npm run build && npm run bench       # editing benchmark on a large document
-npm run build && npm run test:a11y   # axe-core accessibility audit of every screen
-npm run build && npm run test:files  # saving back to files on the device
 ```
 
-The end-to-end suite drives the real app: typing and formatting, the ribbon, undo/redo, pagination invariants (every rendered line must fall inside a page's content area, before and after edits), find & replace, persistence across reloads, the File backstage, conflicting saves from two tabs, `.docx` and Markdown export (the `.docx` is parsed back to verify it), Markdown import and page setup. It uses `playwright-core`; set `CHROME_PATH` to point at a Chromium binary, or run `npx playwright-core install --no-shell chromium` first.
+The end-to-end suite drives the real app: typing and formatting, the ribbon, undo/redo, pagination invariants (every rendered line must fall inside a page's content area, before and after edits), find & replace, persistence across reloads, the File backstage, conflicting saves from two tabs, export (the `.docx` is parsed back to verify it), import, paste from other apps and page setup. It uses `playwright-core`; set `CHROME_PATH` to point at a Chromium binary, or run `npx playwright-core install --no-shell chromium` first.
+
+Debugging a failing end-to-end test:
+
+```bash
+node tests/e2e/smoke.mjs --grep "paste"      # only tests whose name contains "paste" (after opening a blank document)
+node tests/e2e/files.mjs --bail              # stop at the first failure
+HEADED=1 SLOWMO=250 node tests/e2e/smoke.mjs --grep "comments"   # watch it in a visible browser
+npx vitest run tests/unit/paste.test.js      # one unit test file
+```
+
+A page error or console error fails the test it happens in. Each failing test leaves a screenshot, the page HTML and the document JSON in `test-results/<suite>/`; CI uploads that folder as an artifact. Tests that need LibreOffice (checking that it opens LibreWord's `.odt` and `.rtf`) run only when `soffice` is installed. In the app, `window.libreword` holds the open editor for poking around in devtools, and **File › Info › Copy details for a bug report** copies version, browser, storage and recent errors (no document text).
 
 ## Project structure
 

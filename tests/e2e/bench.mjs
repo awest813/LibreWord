@@ -1,12 +1,12 @@
 /**
  * Editing benchmark on a large document.  npm run build && npm run bench
  */
-import { chromium } from 'playwright-core';
-import { startPreview, LAUNCH } from './server.mjs';
+import { startPreview } from './server.mjs';
+import { launch } from './harness.mjs';
 
 const N = Number(process.argv[2] || 2000);
 const { base, stop } = await startPreview();
-const browser = await chromium.launch(LAUNCH);
+const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
 page.on('pageerror', (e) => console.log('pageerror', e.message));
 await page.goto(base);

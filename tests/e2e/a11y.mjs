@@ -2,14 +2,14 @@
  * Accessibility audit with axe-core across the main screens.
  *   npm run build && npm run test:a11y
  */
-import { chromium } from 'playwright-core';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { startPreview, LAUNCH } from './server.mjs';
+import { startPreview } from './server.mjs';
+import { launch } from './harness.mjs';
 
 const axeSource = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
 const { base, stop } = await startPreview();
-const browser = await chromium.launch(LAUNCH);
+const browser = await launch();
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
 
 let total = 0;

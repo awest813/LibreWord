@@ -1,10 +1,24 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+
+// Shown in File › Info and in bug-report details (src/diagnostics.js).
+const version = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version;
+let commit = 'unknown';
+try {
+  commit = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+} catch { /* not a git checkout */ }
 
 // `base: './'` keeps every asset URL relative, so the build in `dist/` can be
 // served from any static host or sub-path (GitHub Pages, Netlify, S3, a USB stick…).
 export default defineConfig({
   base: './',
+  define: {
+    __APP_VERSION__: JSON.stringify(version),
+    __BUILD_COMMIT__: JSON.stringify(commit),
+    __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
+  },
   build: {
     target: 'es2022',
     sourcemap: false,
@@ -63,6 +77,8 @@ export default defineConfig({
   ],
   test: {
     environment: 'jsdom',
+    // One VM context per file instead of a new worker with its own jsdom: about a third faster.
+    pool: 'vmThreads',
     include: ['tests/unit/**/*.test.js'],
   },
 });
