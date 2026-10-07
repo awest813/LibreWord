@@ -30,12 +30,35 @@ const SPLITTABLE = new Set(['bulletList', 'orderedList', 'taskList', 'listItem',
  * - cell spacers ({ cell: { from, to } }) sit inside one cell of a table row
  *   that is split across pages, and only push that cell's own content down;
  * - row growth entries ({ growth: true }, never rendered) record how much
- *   taller such a row became, which is what pushes the content after it.
+ *   taller such a row became, which is what pushes the content after it;
+ * - repeated headers ({ header: { tablePos, rows, sig } }) are copies of a
+ *   table's header rows shown above the first row on each later page.
  */
+function headerWidgets(s) {
+  const { tablePos, rows, sig } = s.header;
+  return Array.from({ length: rows }, (_, i) => Decoration.widget(
+    s.pos,
+    (view) => {
+      const wrap = view.nodeDOM(tablePos);
+      const table = wrap?.nodeName === 'TABLE' ? wrap : wrap?.querySelector?.('table');
+      const source = table ? [...table.querySelectorAll(':scope > tbody > tr, :scope > tr')][i] : null;
+      const row = source ? source.cloneNode(true) : document.createElement('tr');
+      row.querySelectorAll('.column-resize-handle').forEach((el) => el.remove());
+      row.querySelectorAll('.selectedCell').forEach((el) => el.classList.remove('selectedCell'));
+      row.classList.add('pm-repeat-header');
+      row.setAttribute('contenteditable', 'false');
+      row.setAttribute('aria-hidden', 'true');
+      return row;
+    },
+    // After the filler spacer at the same position (side -1), before the row.
+    { side: -1 + (i + 1) / (rows + 1), ignoreSelection: true, marks: [], key: `pgh:${s.pos}:${i}:${sig}` },
+  ));
+}
+
 function buildDecorations(doc, spacers) {
   const shown = spacers.filter((s) => !s.growth);
   if (!shown.length) return DecorationSet.empty;
-  const decos = shown.map((s) =>
+  const decos = shown.flatMap((s) => (s.header ? headerWidgets(s) : [
     Decoration.widget(
       s.pos,
       () => {
@@ -48,7 +71,7 @@ function buildDecorations(doc, spacers) {
       },
       { side: -1, ignoreSelection: true, marks: [], key: `pg:${s.pos}:${s.inline ? 'i' : 'b'}:${s.height.toFixed(1)}` },
     ),
-  );
+  ]));
   return DecorationSet.create(doc, decos);
 }
 
@@ -57,6 +80,7 @@ function sameSpacers(a, b) {
   for (let i = 0; i < a.length; i++) {
     if (a[i].pos !== b[i].pos || a[i].inline !== b[i].inline || !a[i].growth !== !b[i].growth || Math.abs(a[i].height - b[i].height) > 0.5) return false;
     if (a[i].cell?.from !== b[i].cell?.from || a[i].cell?.to !== b[i].cell?.to) return false;
+    if (a[i].header?.sig !== b[i].header?.sig || a[i].header?.tablePos !== b[i].header?.tablePos) return false;
   }
   return true;
 }
@@ -112,11 +136,48 @@ export function computeLayout(view, geometry, oldSpacers, { dirty = null, prevPa
   let breakAfterPage = -1;
   let maxBottom = margins.top;
   let currentCell = null; // { from, to } while laying out a cell of a split table row
+  let tableHeader = null; // the header rows of the table being laid out row by row
+
+  /**
+   * Move a block that doesn't fit to the top of the next page. A table's body
+   * row there gets the table's header rows repeated above it, as in Word.
+   * Returns the block's new top.
+   */
+  const toNextPage = (node, pos, anchor, top, k, height) => {
+    addSpacer(anchor, contentTop(k + 1) - top);
+    let next = contentTop(k + 1);
+    const hd = tableHeader;
+    if (hd && !currentCell && node.type.name === 'tableRow' && pos >= hd.bodyStart && hd.height + height <= contentHeight + EPS) {
+      spacers.push({ pos: anchor, height: hd.height, inline: false, header: { tablePos: hd.tablePos, rows: hd.rows, sig: hd.sig } });
+      shift += hd.height;
+      next += hd.height;
+    }
+    return next;
+  };
+
+  /** Leading rows made only of header cells repeat on each page (Word's "repeat header rows"). */
+  const headerOf = (table, pos) => {
+    const isHeader = (row) => row.childCount > 0 && row.content.content.every((c) => c.type.name === 'tableHeader');
+    let rows = 0;
+    let end = pos + 1;
+    while (rows < table.childCount && isHeader(table.child(rows))) end += table.child(rows++).nodeSize;
+    if (!rows || rows >= table.childCount) return null;
+    const first = view.nodeDOM(pos + 1);
+    const last = view.nodeDOM(end - table.child(rows - 1).nodeSize);
+    if (first?.nodeType !== 1 || last?.nodeType !== 1) return null;
+    const height = (last.getBoundingClientRect().bottom - first.getBoundingClientRect().top) / scale - (oldBefore(end - 1) - oldBefore(pos + 1));
+    // A header taller than half a page would leave little room for anything else.
+    if (!(height > 0) || height > contentHeight / 2) return null;
+    let sig = 0;
+    const text = JSON.stringify(table.content.content.slice(0, rows).map((r) => r.toJSON()));
+    for (let i = 0; i < text.length; i++) sig = (sig * 31 + text.charCodeAt(i)) | 0;
+    return { tablePos: pos, bodyStart: end, rows, height, sig: (sig >>> 0).toString(36) };
+  };
 
   const addSpacer = (pos, height, inline = false) => {
     if (height <= EPS) return;
     const last = spacers[spacers.length - 1];
-    if (last && last.pos === pos && last.inline === inline && !last.growth && (last.cell || null) === currentCell) last.height += height;
+    if (last && last.pos === pos && last.inline === inline && !last.growth && !last.header && (last.cell || null) === currentCell) last.height += height;
     else spacers.push(currentCell ? { pos, height, inline, cell: currentCell } : { pos, height, inline });
     shift += height;
   };
@@ -210,24 +271,23 @@ export function computeLayout(view, geometry, oldSpacers, { dirty = null, prevPa
     let k = pageOf(top);
     if (top > contentBottom(k) - EPS) {
       // Starts inside the bottom margin / page gap: move to the next page.
-      const s = contentTop(k + 1) - top;
-      addSpacer(anchor, s);
-      top += s;
+      top = toNextPage(node, pos, anchor, top, k, height);
       k += 1;
     }
 
     let bottom = top + height;
     if (bottom > contentBottom(k) + EPS) {
       if (SPLITTABLE.has(node.type.name) && node.childCount > 0) {
+        const outerHeader = tableHeader;
+        if (node.type.name === 'table') tableHeader = currentCell ? null : headerOf(node, pos);
         layoutChildren(node, pos + 1, anchor);
+        tableHeader = outerHeader;
         return;
       }
       if (node.isTextblock && node.content.size > 0) {
         bottom = splitTextblock(node, pos, anchor, top, height, k);
       } else if (top > contentTop(k) + EPS && height <= contentHeight + EPS) {
-        const s = contentTop(k + 1) - top;
-        addSpacer(anchor, s);
-        bottom += s;
+        bottom = toNextPage(node, pos, anchor, top, k, height) + height;
       } else if (node.type.name === 'tableRow' && !currentCell) {
         // Taller than a page: break the row across pages, as Word does.
         bottom = splitRow(node, pos, top, height);
@@ -344,7 +404,9 @@ export function computeLayout(view, geometry, oldSpacers, { dirty = null, prevPa
   // A trailing page break starts a fresh (empty) page.
   if (breakAfterPage >= 0) maxBottom = Math.max(maxBottom, contentTop(breakAfterPage + 1));
 
-  spacers.sort((a, b) => a.pos - b.pos || (a.inline ? 1 : -1));
+  // At one position: block spacer, then repeated header, then inline spacer.
+  const rank = (s) => (s.inline ? 2 : s.header ? 1 : 0);
+  spacers.sort((a, b) => a.pos - b.pos || rank(a) - rank(b));
   const pageCount = converged ? prevPageCount : Math.max(1, pageOf(maxBottom - EPS * 2) + 1);
   return { spacers, pageCount, scale, tops };
 }
@@ -432,7 +494,8 @@ export const Pagination = Extension.create({
               const r = tr.mapping.mapResult(s.pos, -1);
               if (r.deleted) continue;
               const cell = s.cell && { from: tr.mapping.map(s.cell.from, 1), to: tr.mapping.map(s.cell.to, -1) };
-              spacers.push(cell ? { ...s, pos: r.pos, cell } : { ...s, pos: r.pos });
+              const header = s.header && { ...s.header, tablePos: tr.mapping.map(s.header.tablePos, 1) };
+              spacers.push({ ...s, pos: r.pos, ...(cell ? { cell } : {}), ...(header ? { header } : {}) });
             }
             return {
               spacers,

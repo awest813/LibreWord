@@ -362,12 +362,15 @@ class Converter {
     const fill = unknown ? Math.max(36, (total - known) / unknown) : 0;
     const columnWidths = widths.map((w) => Math.round((w || fill) * TWIPS_PER_PX));
     const border = { style: BorderStyle.SINGLE, size: 4, color: 'BFBFBF' };
+    // Leading rows of header cells repeat at the top of each page, as in the editor.
+    let headerRows = 0;
+    while (headerRows < rows.length - 1 && (rows[headerRows].content || []).length && rows[headerRows].content.every((c) => c.type === 'tableHeader')) headerRows++;
     return new Table({
       width: { size: columnWidths.reduce((a, b) => a + b, 0), type: WidthType.DXA },
       columnWidths,
       borders: { top: border, bottom: border, left: border, right: border, insideHorizontal: border, insideVertical: border },
       rows: rows.map((row, ri) => new TableRow({
-        tableHeader: ri === 0 && (row.content || []).every((c) => c.type === 'tableHeader'),
+        tableHeader: ri < headerRows,
         children: (row.content || []).map((cell) => {
           const children = this.blocks(cell.content, { run: cell.type === 'tableHeader' ? { bold: true } : undefined });
           return new TableCell({

@@ -382,6 +382,7 @@ button { cursor: pointer; }
 .page-stack .lw-document ::selection { background: rgba(0, 120, 215, 0.3); }
 
 .pm-page-spacer { display: block; pointer-events: none; user-select: none; }
+.pm-repeat-header { pointer-events: none; user-select: none; }
 .pm-page-spacer-inline { display: block; }
 .lw-document .page-break {
   height: 0; margin: 0; border: 0; position: relative; user-select: none;
@@ -659,7 +660,7 @@ kbd { font: 12px var(--font-ui); background: var(--surface-2); border: 1px solid
   .editor-screen, .workspace, .canvas, .canvas-inner { display: block !important; height: auto !important; overflow: visible !important; padding: 0 !important; background: #fff !important; }
   .page-stack { zoom: 1 !important; width: auto !important; min-height: 0 !important; box-shadow: none !important; }
   .page-stack .lw-document { padding: 0 !important; min-height: 0 !important; width: auto !important; }
-  .pm-page-spacer { display: none !important; }
+  .pm-page-spacer, .pm-repeat-header { display: none !important; }
   .lw-document .page-break { break-after: page; }
   .lw-document .page-break::after { display: none; }
   .lw-document .search-match { background: none; }

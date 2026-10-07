@@ -597,6 +597,7 @@ await test('reloading right after typing keeps the last edits', async () => {
   await page.evaluate(() => window.libreword.editor.commands.setContent('<p>before</p>'));
   await page.evaluate(() => window.libreword.screen.flush());
   await page.evaluate(() => window.libreword.editor.commands.focus('end'));
+  await settle(); // TipTap focuses on the next frame
   await page.keyboard.type(' typed then reloaded');
   await page.reload(); // well inside the autosave delay
   await editorReady();
@@ -730,6 +731,40 @@ await test('a table row taller than a page breaks across pages', async () => {
   assert.equal(await spacers(), incremental);
 });
 
+await test('table header rows repeat at the top of each page the table continues on', async () => {
+  const rows = Array.from({ length: 90 }, (_, i) => `<tr><td><p>Item ${i + 1}</p></td><td><p>${i}</p></td></tr>`).join('');
+  await page.evaluate((html) => window.libreword.editor.commands.setContent(html),
+    `<p>Intro</p><table><tr><th><p>Name</p></th><th><p>Amount</p></th></tr>${rows}</table><p>After</p>`);
+  await settle();
+  await settle();
+  assert.deepEqual(await layoutViolations(), []);
+  const heads = () => page.evaluate(() => {
+    const s = window.libreword.screen;
+    const g = s.geometry;
+    const root = s.editorEl.getBoundingClientRect();
+    const z = root.width / g.width;
+    const P = g.height + g.gap;
+    return [...s.editorEl.querySelectorAll('tr.pm-repeat-header')].map((tr) => {
+      const y = (tr.getBoundingClientRect().top - root.top) / z;
+      const k = Math.floor(y / P);
+      return { page: k + 1, atTop: Math.abs(y - (k * P + g.margins.top)) < 2, text: tr.textContent };
+    });
+  });
+  const pages = await page.evaluate(() => window.libreword.screen.pageCount);
+  assert.ok(pages >= 3);
+  assert.deepEqual(await heads(), Array.from({ length: pages - 1 }, (_, i) => ({ page: i + 2, atTop: true, text: 'NameAmount' })));
+  // Editing the header updates every copy.
+  await page.evaluate(() => {
+    const ed = window.libreword.editor;
+    let at = null;
+    ed.state.doc.descendants((n, pos) => { if (at == null && n.isText && n.text === 'Amount') at = pos; });
+    ed.chain().setTextSelection(at + 6).insertContent(' (USD)').run();
+  });
+  await settle();
+  await settle();
+  assert.ok((await heads()).every((h) => h.text === 'NameAmount (USD)'));
+});
+
 await test('table shading colours the cell and exports it', async () => {
   await page.evaluate(() => {
     const ed = window.libreword.editor;
@@ -743,6 +778,7 @@ await test('table shading colours the cell and exports it', async () => {
   const bg = await page.evaluate(() => getComputedStyle(window.libreword.screen.editorEl.querySelector('td')).backgroundColor);
   assert.notEqual(bg, 'rgba(0, 0, 0, 0)');
   assert.match(await page.evaluate(() => window.libreword.editor.getHTML()), /<td[^>]*style="background-color: /);
+  await settle(); // TipTap focuses on the next frame
   assert.equal(await page.evaluate(() => window.libreword.screen.editorEl.contains(document.activeElement)), true);
 });
 
@@ -768,6 +804,7 @@ await test('keyboard: Ctrl+Alt+0 sets Normal text, F6 reaches the ribbon and bac
     ed.commands.setContent('<h2>Head</h2><p>body</p>');
     ed.commands.focus(3);
   });
+  await settle(); // TipTap focuses on the next frame
   await page.keyboard.press('Control+Alt+0');
   assert.match(await page.evaluate(() => window.libreword.editor.getHTML()), /^<p>Head<\/p>/);
   await page.keyboard.press('F6');

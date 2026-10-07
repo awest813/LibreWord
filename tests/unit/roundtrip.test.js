@@ -66,6 +66,16 @@ describe('.docx export', () => {
   });
 });
 
+describe('table header rows', () => {
+  it('marks every leading header row to repeat on each page in Word', async () => {
+    const JSZip = (await import('jszip')).default;
+    const row = (type, text) => ({ type: 'tableRow', content: [{ type, content: [p(t(text))] }] });
+    const json = doc({ type: 'table', content: [row('tableHeader', 'H1'), row('tableHeader', 'H2'), row('tableCell', 'body'), row('tableHeader', 'not a header')] });
+    const xml = await (await JSZip.loadAsync(await docxBuffer(json, DEFAULT_SETTINGS, {}))).file('word/document.xml').async('string');
+    expect((xml.match(/<w:tblHeader\/>|<w:tblHeader w:val="(true|1|on)"\/>/g) || []).length).toBe(2);
+  });
+});
+
 describe('Markdown round trip', () => {
   it('keeps text that looks like list markers, rules or setext underlines as text', async () => {
     const lines = ['3. Results', '1990. A great year', '1) first', '-', '---', '+ plus'];
