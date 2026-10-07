@@ -765,6 +765,58 @@ await test('table header rows repeat at the top of each page the table continues
   assert.ok((await heads()).every((h) => h.text === 'NameAmount (USD)'));
 });
 
+await test('paste from Google Docs through the browser keeps structure and formatting', async () => {
+  await page.evaluate(() => window.libreword.editor.chain().setContent('<p></p>').focus().run());
+  await settle();
+  // The pasted picture lives on Google's servers; serve it here, with the CORS header Google sends.
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==', 'base64');
+  await page.route('https://lh7-rt.googleusercontent.com/**', (route) => route.fulfill({ status: 200, contentType: 'image/png', headers: { 'access-control-allow-origin': '*' }, body: png }));
+  const html = await readFile(new URL('../fixtures/clipboard/google-docs.html', import.meta.url), 'utf8');
+  await page.evaluate((html) => {
+    const dt = new DataTransfer();
+    dt.setData('text/html', html);
+    dt.setData('text/plain', 'Project Plan');
+    window.libreword.editor.view.dom.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  }, html);
+  await settle();
+  const out = await page.evaluate(() => window.libreword.editor.getHTML());
+  assert.match(out, /^<h1/);
+  assert.match(out, /<ul data-type="taskList">/);
+  assert.match(out, /<mark[^>]*>highlighted<\/mark>/);
+  assert.match(out, /data-page-break/);
+  assert.match(out, /href="https:\/\/example\.com\/page\?a=1"/);
+  assert.doesNotMatch(out, /docs-internal-guid|aria-roledescription/);
+  // The web picture is copied into the document, so it works offline and exports.
+  await page.waitForFunction(() => /<img src="data:image\/png;base64,/.test(window.libreword.editor.getHTML()));
+  await page.unroute('https://lh7-rt.googleusercontent.com/**');
+});
+
+await test('copy and paste within LibreWord keeps styles, checklists and page breaks', async () => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(BASE).origin });
+  await page.evaluate(() => window.libreword.editor.chain()
+    .setContent('<p data-style="title">Big title</p><ul data-type="taskList"><li data-type="taskItem" data-checked="true"><p>done</p></li></ul><div data-page-break></div><p>after</p>')
+    .selectAll().focus().run());
+  await settle();
+  await page.keyboard.press('Control+c');
+  const copied = await page.evaluate(async () => {
+    const [item] = await navigator.clipboard.read();
+    return (await item.getType('text/html')).text();
+  });
+  // Other apps get inline formatting, a visible box and Word's page break.
+  assert.match(copied, /font-size:28pt/);
+  assert.match(copied, /☒ /);
+  assert.match(copied, /page-break-before:always/);
+  await page.evaluate(() => window.libreword.editor.chain().setContent('<p></p>').focus().run());
+  await settle();
+  await page.keyboard.press('Control+v');
+  await settle();
+  const json = await page.evaluate(() => window.libreword.editor.getJSON());
+  assert.deepEqual(json.content.map((n) => n.type), ['paragraph', 'taskList', 'pageBreak', 'paragraph']);
+  assert.equal(json.content[0].attrs.styleId, 'title');
+  assert.equal(json.content[1].content[0].attrs.checked, true);
+  assert.equal(await page.evaluate(() => window.libreword.editor.getText().includes('☒')), false);
+});
+
 await test('table shading colours the cell and exports it', async () => {
   await page.evaluate(() => {
     const ed = window.libreword.editor;

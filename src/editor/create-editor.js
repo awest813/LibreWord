@@ -18,6 +18,7 @@ import { Search } from './search.js';
 import { TableOfContents } from './toc.js';
 import { WordCommands } from './word-commands.js';
 import { CommentMark } from './comments.js';
+import { PasteFormatting } from './paste-formatting.js';
 
 // Cell shading (Table > Shading, and Word's w:shd on import/export).
 const shading = {
@@ -34,7 +35,7 @@ const ShadedHeader = TableHeader.extend({ addAttributes() { return { ...this.par
  * The extension list is shared by the live editor and by tests, so the
  * schema is defined in exactly one place.
  */
-export function buildExtensions({ getGeometry = () => null, onLayout = () => {}, getPageOf = null, isKnownComment = null } = {}) {
+export function buildExtensions({ getGeometry = () => null, onLayout = () => {}, getPageOf = null, isKnownComment = null, onPasteReport = null, inlinePastedImages = false } = {}) {
   return [
     StarterKit.configure({
       heading: { levels: [1, 2, 3, 4, 5, 6] },
@@ -68,11 +69,12 @@ export function buildExtensions({ getGeometry = () => null, onLayout = () => {},
     WordCommands,
     CommentMark.configure({ isKnown: isKnownComment }),
     Search,
+    PasteFormatting.configure({ onReport: onPasteReport, inlineImages: inlinePastedImages }),
     Pagination.configure({ getGeometry, onLayout }),
   ];
 }
 
-export function createEditor({ element, content, getGeometry, onLayout, getPageOf, isKnownComment, onUpdate, onSelectionUpdate, onTransaction, onContentError, editorProps = {} }) {
+export function createEditor({ element, content, getGeometry, onLayout, getPageOf, isKnownComment, onPasteReport, onUpdate, onSelectionUpdate, onTransaction, onContentError, editorProps = {} }) {
   let editor;
   editor = new Editor({
     element,
@@ -81,6 +83,8 @@ export function createEditor({ element, content, getGeometry, onLayout, getPageO
       getGeometry,
       getPageOf,
       isKnownComment,
+      onPasteReport,
+      inlinePastedImages: true,
       onLayout: (info) => {
         onLayout?.(info);
         editor?.emit('pagination', info);

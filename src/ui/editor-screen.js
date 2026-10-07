@@ -9,8 +9,7 @@ import {
   FILE_FORMATS, LOSSY_NOTES, canSaveToFiles, ensureWritePermission, fileNameFor, formatOfName, handleFromDataTransfer,
   pickSaveLocation, writeToHandle,
 } from '../io/file-access.js';
-import { sanitizeHtml } from '../io/import.js';
-import { transformPastedHTML } from '../io/paste.js';
+import { sanitizeHtml, canOpen } from '../io/import.js';
 import { commentRanges } from '../editor/comments.js';
 import { h, toast, debounce, isPopoverOpen, closePopover, isMac, shortcutLabel, setFocusFallback } from './dom.js';
 import { icon } from './icons.js';
@@ -139,12 +138,12 @@ export class EditorScreen {
       onLayout: ({ pageCount }) => this.onLayout(pageCount),
       getPageOf: (pos) => this.pageOfPos(pos),
       isKnownComment: (id) => Boolean(this.comments?.[id]),
+      onPasteReport: ({ droppedImages }) => toast(`${droppedImages} picture${droppedImages === 1 ? '' : 's'} couldn’t be pasted from Word. Use Insert › Pictures to add ${droppedImages === 1 ? 'it' : 'them'}.`, { timeout: 7000 }),
       onUpdate: ({ transaction }) => this.onDocChange(transaction),
       onSelectionUpdate: () => this.onSelectionChange(),
       onTransaction: () => this.scheduleUiUpdate(),
       onContentError: ({ error }) => { contentError = error; },
       editorProps: {
-        transformPastedHTML,
         handlePaste: (view, event) => {
           // Office apps put a picture of the selection on the clipboard next to
           // the HTML; prefer the HTML so text stays text.
@@ -1181,7 +1180,7 @@ export class EditorScreen {
   handleFiles(files, pos, dataTransfer = null) {
     const images = [...(files || [])].filter((f) => f.type.startsWith('image/'));
     if (!images.length) {
-      const docs = [...(files || [])].filter((f) => /\.(docx|md|markdown|txt|html?|rtf)$/i.test(f.name));
+      const docs = [...(files || [])].filter((f) => canOpen(f.name));
       if (docs.length && pos != null) {
         // Dropping a document opens it (linked to the file where the browser allows).
         handleFromDataTransfer(dataTransfer, docs[0]).then((handle) => this.leaveDocument(() => this.nav_.onImport(docs[0], handle?.kind === 'file' ? handle : null)));
