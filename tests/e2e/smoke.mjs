@@ -700,6 +700,36 @@ await test('renaming in another tab is kept by the tab editing the document', as
   assert.equal(await page.evaluate(() => window.libreword.screen.docId), id);
 });
 
+await test('a table row taller than a page breaks across pages', async () => {
+  const ps = (n, t) => Array.from({ length: n }, (_, i) => `<p>${t} ${i + 1} lorem ipsum dolor sit amet</p>`).join('');
+  const spacers = () => page.evaluate(() => {
+    const st = window.libreword.editor.view.state;
+    return JSON.stringify([...st.plugins].find((p) => p.key.startsWith('pagination')).getState(st).spacers);
+  });
+  await page.evaluate((html) => window.libreword.editor.commands.setContent(html),
+    `<p>Top</p><table><tr><td><p>row 1</p></td><td><p>r1</p></td></tr><tr><td>${ps(70, 'Left')}</td><td>${ps(40, 'Right')}</td></tr></table>${ps(10, 'After')}`);
+  await settle();
+  await settle();
+  assert.deepEqual(await layoutViolations(), []);
+  // Editing inside the split cell lays out exactly as a full pass would.
+  await page.evaluate(() => {
+    const ed = window.libreword.editor;
+    let at = null;
+    ed.state.doc.descendants((n, pos) => { if (at == null && n.isText && n.text.startsWith('Left 30 ')) at = pos; });
+    ed.chain().setTextSelection(at + 3).focus().run();
+  });
+  await page.keyboard.type(' and enough extra words to wrap this line onto a second line in the cell');
+  await page.keyboard.press('Enter');
+  await settle();
+  await settle();
+  assert.deepEqual(await layoutViolations(), []);
+  const incremental = await spacers();
+  await page.evaluate(() => window.libreword.editor.commands.repaginate());
+  await settle();
+  await settle();
+  assert.equal(await spacers(), incremental);
+});
+
 await test('table shading colours the cell and exports it', async () => {
   await page.evaluate(() => {
     const ed = window.libreword.editor;

@@ -24,9 +24,18 @@ export const paginationKey = new PluginKey('pagination');
 const EPS = 0.75;
 const SPLITTABLE = new Set(['bulletList', 'orderedList', 'taskList', 'listItem', 'taskItem', 'blockquote', 'table']);
 
+/*
+ * Spacers come in three kinds:
+ * - flow spacers (block or inline) push everything after them down;
+ * - cell spacers ({ cell: { from, to } }) sit inside one cell of a table row
+ *   that is split across pages, and only push that cell's own content down;
+ * - row growth entries ({ growth: true }, never rendered) record how much
+ *   taller such a row became, which is what pushes the content after it.
+ */
 function buildDecorations(doc, spacers) {
-  if (!spacers.length) return DecorationSet.empty;
-  const decos = spacers.map((s) =>
+  const shown = spacers.filter((s) => !s.growth);
+  if (!shown.length) return DecorationSet.empty;
+  const decos = shown.map((s) =>
     Decoration.widget(
       s.pos,
       () => {
@@ -46,7 +55,8 @@ function buildDecorations(doc, spacers) {
 function sameSpacers(a, b) {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
-    if (a[i].pos !== b[i].pos || a[i].inline !== b[i].inline || Math.abs(a[i].height - b[i].height) > 0.5) return false;
+    if (a[i].pos !== b[i].pos || a[i].inline !== b[i].inline || !a[i].growth !== !b[i].growth || Math.abs(a[i].height - b[i].height) > 0.5) return false;
+    if (a[i].cell?.from !== b[i].cell?.from || a[i].cell?.to !== b[i].cell?.to) return false;
   }
   return true;
 }
@@ -74,10 +84,19 @@ export function computeLayout(view, geometry, oldSpacers, { dirty = null, prevPa
   const pageOf = (y) => Math.max(0, Math.floor((y + EPS) / P));
 
   // Prefix sums of the spacers currently in the DOM, for natural positions.
-  const oldPos = oldSpacers.map((s) => s.pos);
+  // Cell spacers only affect positions inside their own cell, so they're kept apart.
+  const oldFlow = oldSpacers.filter((s) => !s.cell);
+  const oldCell = oldSpacers.filter((s) => s.cell);
+  const oldPos = oldFlow.map((s) => s.pos);
   const oldSum = [0];
-  for (const s of oldSpacers) oldSum.push(oldSum[oldSum.length - 1] + s.height);
-  const oldBefore = (pos) => {
+  for (const s of oldFlow) oldSum.push(oldSum[oldSum.length - 1] + s.height);
+  const oldBefore = (pos) => flowBefore(pos) + (oldCell.length ? cellBefore(pos) : 0);
+  const cellBefore = (pos) => {
+    let sum = 0;
+    for (const s of oldCell) if (s.pos <= pos && s.cell.from < pos && pos < s.cell.to) sum += s.height;
+    return sum;
+  };
+  const flowBefore = (pos) => {
     let lo = 0;
     let hi = oldPos.length;
     while (lo < hi) {
@@ -92,12 +111,13 @@ export function computeLayout(view, geometry, oldSpacers, { dirty = null, prevPa
   let shift = 0;
   let breakAfterPage = -1;
   let maxBottom = margins.top;
+  let currentCell = null; // { from, to } while laying out a cell of a split table row
 
   const addSpacer = (pos, height, inline = false) => {
     if (height <= EPS) return;
     const last = spacers[spacers.length - 1];
-    if (last && last.pos === pos && last.inline === inline) last.height += height;
-    else spacers.push({ pos, height, inline });
+    if (last && last.pos === pos && last.inline === inline && !last.growth && (last.cell || null) === currentCell) last.height += height;
+    else spacers.push(currentCell ? { pos, height, inline, cell: currentCell } : { pos, height, inline });
     shift += height;
   };
 
@@ -208,9 +228,52 @@ export function computeLayout(view, geometry, oldSpacers, { dirty = null, prevPa
         const s = contentTop(k + 1) - top;
         addSpacer(anchor, s);
         bottom += s;
+      } else if (node.type.name === 'tableRow' && !currentCell) {
+        // Taller than a page: break the row across pages, as Word does.
+        bottom = splitRow(node, pos, top, height);
       }
     }
     if (bottom > maxBottom) maxBottom = bottom;
+  };
+
+  /**
+   * Lay out each cell of a table row on its own, all starting at the row's
+   * top, so a page break inside one cell doesn't move the others. The row
+   * then ends below its tallest cell; that growth is what moves the content
+   * after the row (rather than the sum of every cell's spacers).
+   */
+  const splitRow = (row, pos, top, height) => {
+    const naturalBottom = top + height;
+    const startShift = shift;
+    const outerMax = maxBottom;
+    let bottom = naturalBottom;
+    row.forEach((cell, offset) => {
+      const cellPos = pos + 1 + offset;
+      currentCell = { from: cellPos, to: cellPos + cell.nodeSize };
+      shift = startShift;
+      maxBottom = -Infinity;
+      layoutChildren(cell, cellPos + 1, null);
+      if (maxBottom === -Infinity) return;
+      // Below the last child: its bottom margin, then the cell's padding and border.
+      const cellDom = view.nodeDOM(cellPos);
+      const lastDom = cell.lastChild && view.nodeDOM(cellPos + cell.nodeSize - 1 - cell.lastChild.nodeSize);
+      let trail = 0;
+      if (cellDom?.nodeType === 1) {
+        const cs = getComputedStyle(cellDom);
+        trail += (parseFloat(cs.paddingBottom) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+      }
+      if (lastDom?.nodeType === 1) trail += parseFloat(getComputedStyle(lastDom).marginBottom) || 0;
+      bottom = Math.max(bottom, maxBottom + trail);
+    });
+    currentCell = null;
+    maxBottom = outerMax;
+    shift = startShift;
+    const growth = bottom - naturalBottom;
+    if (growth > EPS) {
+      spacers.push({ pos: pos + row.nodeSize - 1, height: growth, growth: true });
+      shift += growth;
+    }
+    return bottom;
   };
 
   const layoutChildren = (parent, contentStart, firstAnchor) => {
@@ -236,7 +299,7 @@ export function computeLayout(view, geometry, oldSpacers, { dirty = null, prevPa
     for (const s of oldSpacers) {
       if (s.pos >= startPos) break;
       spacers.push({ ...s });
-      shift += s.height;
+      if (!s.cell) shift += s.height;
     }
   }
 
@@ -367,7 +430,9 @@ export const Pagination = Extension.create({
             const spacers = [];
             for (const s of prev.spacers) {
               const r = tr.mapping.mapResult(s.pos, -1);
-              if (!r.deleted) spacers.push({ ...s, pos: r.pos });
+              if (r.deleted) continue;
+              const cell = s.cell && { from: tr.mapping.map(s.cell.from, 1), to: tr.mapping.map(s.cell.to, -1) };
+              spacers.push(cell ? { ...s, pos: r.pos, cell } : { ...s, pos: r.pos });
             }
             return {
               spacers,
