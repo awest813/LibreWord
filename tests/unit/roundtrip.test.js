@@ -5,7 +5,7 @@ import { buildExtensions } from '../../src/editor/create-editor.js';
 import { jsonToMarkdown } from '../../src/io/markdown.js';
 import { docxBuffer } from '../../src/io/docx.js';
 import { readDocx } from '../../src/io/docx-import.js';
-import { markdownToHtml, textToHtml, preserveSpaces, sanitizeHtml } from '../../src/io/import.js';
+import { markdownToHtml, textToHtml, preserveSpaces, sanitizeHtml, decodeText, canOpen } from '../../src/io/import.js';
 import { cleanWordHtml } from '../../src/io/paste.js';
 import { DEFAULT_SETTINGS } from '../../src/storage/db.js';
 
@@ -63,6 +63,29 @@ describe('.docx export', () => {
     });
     const item = (await viaDocx(json)).content[0].content[0];
     expect(item.content.map((n) => n.type)).toEqual(['paragraph', 'orderedList', 'bulletList']);
+  });
+});
+
+describe('decoding text files', () => {
+  const bytes = (...b) => new Uint8Array(b.flat()).buffer;
+  it('reads byte-order marks, BOM-less UTF-16, UTF-8 and Windows-1252', () => {
+    const le = [...new TextEncoder().encode('ab')].flatMap((c) => [c, 0]);
+    expect(decodeText(bytes([0xef, 0xbb, 0xbf], [...new TextEncoder().encode('Grüße')]))).toBe('Grüße');
+    expect(decodeText(bytes([0xff, 0xfe], [0x41, 0, 0xfc, 0]))).toBe('Aü');
+    expect(decodeText(bytes([0xfe, 0xff], [0, 0x41, 0, 0xfc]))).toBe('Aü');
+    expect(decodeText(bytes(Array(20).fill(le).flat()))).toBe('ab'.repeat(20));
+    expect(decodeText(bytes([...new TextEncoder().encode('東京 €')]))).toBe('東京 €');
+    expect(decodeText(bytes([0x43, 0x61, 0x66, 0xe9, 0x20, 0x80]))).toBe('Café €');
+  });
+
+  it('honours a declared charset in HTML', () => {
+    const html = [...new TextEncoder().encode('<meta charset="iso-8859-1"><p>')].concat([0xe9]);
+    expect(decodeText(bytes(html), { html: true })).toMatch(/<p>é$/);
+  });
+
+  it('knows which files it can open', () => {
+    for (const n of ['a.docx', 'a.DOC', 'b.odt', 'c.fodt', 'd.rtf', 'e.txt', 'f.md', 'g.html', 'h.dotx', 'i.ott']) expect(canOpen(n)).toBe(true);
+    for (const n of ['a.pdf', 'b.xlsx', 'c', 'Q3 vs. Q4']) expect(canOpen(n)).toBe(false);
   });
 });
 

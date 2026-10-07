@@ -26,7 +26,7 @@ export function templateCards({ onTemplate, onImport }) {
       h(
         'button',
         { type: 'button', class: 'template-card is-import', onclick: onImport, 'aria-label': 'Open a file from your device' },
-        h('div', { class: 'template-thumb', html: `<div style="display:grid;justify-items:center;gap:8px">${icon('upload', 'icon icon-lg')}<span class="import-formats">Word, Markdown, text, HTML</span></div>` }),
+        h('div', { class: 'template-thumb', html: `<div style="display:grid;justify-items:center;gap:8px">${icon('upload', 'icon icon-lg')}<span class="import-formats">Word, OpenDocument, RTF, text, Markdown</span></div>` }),
         h('span', { class: 'label' }, 'Open from device…'),
       ),
     );

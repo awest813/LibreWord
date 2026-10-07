@@ -6,7 +6,7 @@
  * changes back to that file in its own format. Elsewhere, files are imported
  * as copies and "Save As" downloads a file instead.
  */
-import { IMPORT_ACCEPT } from './import.js';
+import { IMPORT_ACCEPT, OPEN_FORMATS, extOf } from './import.js';
 import { pickFileInput, safeFileName } from '../ui/dom.js';
 
 export const FILE_FORMATS = {
@@ -16,6 +16,13 @@ export const FILE_FORMATS = {
     exts: ['.docx'],
     lossless: true,
   },
+  odt: {
+    label: 'OpenDocument Text',
+    mime: 'application/vnd.oasis.opendocument.text',
+    exts: ['.odt'],
+    lossless: true,
+  },
+  rtf: { label: 'Rich Text Format', mime: 'application/rtf', exts: ['.rtf'], lossless: false },
   md: { label: 'Markdown', mime: 'text/markdown', exts: ['.md', '.markdown'], lossless: false },
   html: { label: 'Web Page', mime: 'text/html', exts: ['.html', '.htm'], lossless: false },
   txt: { label: 'Plain Text', mime: 'text/plain', exts: ['.txt'], lossless: false },
@@ -23,6 +30,7 @@ export const FILE_FORMATS = {
 
 /** What a format can't keep, for the "some formatting will be lost" prompt. */
 export const LOSSY_NOTES = {
+  rtf: 'Rich Text keeps text formatting, headings, lists, tables and pictures, but not comments, headers and footers or a table of contents.',
   md: 'Markdown keeps headings, lists, tables, links and basic text styles, but not fonts, colours, alignment, page setup or comments.',
   html: 'A web page keeps most formatting, but not page setup, headers and footers or comments, and LibreWord reads it back with less detail than a Word document.',
   txt: 'Plain text keeps only the words — all formatting, tables, pictures and comments are lost.',
@@ -40,11 +48,19 @@ export function formatOfName(name = '') {
 /** Swap a file name's extension for the format's own. */
 export function fileNameFor(title, format) {
   // Only strip a document extension; "Q3 vs. Q4" must stay whole.
-  const base = safeFileName(String(title || 'Untitled document').replace(/\.(docx|md|markdown|html?|txt|rtf)$/i, ''));
+  const raw = String(title || 'Untitled document');
+  const base = safeFileName(OPEN_FORMATS[extOf(raw)] ? raw.replace(/\.[^.]+$/, '') : raw);
   return `${base}${FILE_FORMATS[format]?.exts[0] || '.docx'}`;
 }
 
 const isAbort = (err) => err?.name === 'AbortError';
+
+/** { mime: [extensions] } for the open picker, from the formats LibreWord reads. */
+function openPickerAccept() {
+  const accept = {};
+  for (const [ext, f] of Object.entries(OPEN_FORMATS)) (accept[f.mime] ||= []).push(`.${ext}`);
+  return accept;
+}
 
 /**
  * Let the user pick a file to open. Resolves to { file, handle } (handle is
@@ -57,18 +73,7 @@ export async function pickFileToOpen() {
         id: 'libreword-open',
         multiple: false,
         excludeAcceptAllOption: false,
-        types: [
-          {
-            description: 'Documents',
-            accept: {
-              'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
-              'text/markdown': ['.md', '.markdown'],
-              'text/html': ['.html', '.htm'],
-              'text/plain': ['.txt'],
-              'application/rtf': ['.rtf'],
-            },
-          },
-        ],
+        types: [{ description: 'Documents', accept: openPickerAccept() }],
       });
       return { file: await handle.getFile(), handle };
     } catch (err) {

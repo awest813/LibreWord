@@ -5,8 +5,10 @@ import documentCss from '../styles/document.css?inline';
 
 export const EXPORT_FORMATS = [
   { id: 'docx', label: 'Word Document', ext: '.docx', icon: 'file' },
+  { id: 'odt', label: 'OpenDocument Text', ext: '.odt', icon: 'file' },
   { id: 'pdf', label: 'PDF', ext: '.pdf', icon: 'fileDown' },
   { id: 'html', label: 'Web Page', ext: '.html', icon: 'webLayout' },
+  { id: 'rtf', label: 'Rich Text Format', ext: '.rtf', icon: 'type' },
   { id: 'md', label: 'Markdown', ext: '.md', icon: 'code' },
   { id: 'txt', label: 'Plain Text', ext: '.txt', icon: 'type' },
 ];
@@ -53,21 +55,35 @@ ${staticHtml(editor)}
 </html>`;
 }
 
-/** The document as a file in the given format (docx, html, md, txt). */
+/** Page of each heading, for the table of contents' cached entries. */
+function tocPagesOf(editor) {
+  const pageOf = editor.extensionManager.extensions.find((e) => e.name === 'tableOfContents')?.options.getPageOf;
+  return collectHeadings(editor.state.doc).map((h) => {
+    try {
+      return pageOf?.(h.pos) ?? null;
+    } catch {
+      return null;
+    }
+  });
+}
+
+/** The document as a file in the given format (docx, odt, rtf, html, md, txt). */
 export async function renderDocumentBlob(editor, format, { title, settings, comments = {} }) {
   switch (format) {
     case 'docx': {
       const { docxBlob } = await import('./docx.js');
-      const headings = collectHeadings(editor.state.doc);
-      const pageOf = editor.extensionManager.extensions.find((e) => e.name === 'tableOfContents')?.options.getPageOf;
-      const tocPages = headings.map((h) => {
-        try {
-          return pageOf?.(h.pos) ?? null;
-        } catch {
-          return null;
-        }
-      });
-      return docxBlob(editor.getJSON(), settings, { title, comments, tocPages });
+      return docxBlob(editor.getJSON(), settings, { title, comments, tocPages: tocPagesOf(editor) });
+    }
+    case 'odt': {
+      const { writeOdt } = await import('./odt.js');
+      // ODF only numbers the first three heading levels in its contents.
+      const pages = tocPagesOf(editor);
+      const levels = collectHeadings(editor.state.doc).map((h) => h.level);
+      return writeOdt(editor.getJSON(), settings, { title, comments, tocPages: pages.filter((_, i) => levels[i] <= 3), blob: true });
+    }
+    case 'rtf': {
+      const { jsonToRtf } = await import('./rtf.js');
+      return new Blob([jsonToRtf(editor.getJSON(), { title, settings })], { type: 'application/rtf' });
     }
     case 'html':
       return new Blob([standaloneHtml(editor, title, settings)], { type: 'text/html;charset=utf-8' });
@@ -88,7 +104,7 @@ export async function exportDocument(editor, format, meta) {
     return;
   }
   const name = safeFileName(meta.title || 'Untitled document');
-  const ext = { docx: 'docx', html: 'html', md: 'md', txt: 'txt' }[format];
+  const ext = EXPORT_FORMATS.find((f) => f.id === format)?.ext.slice(1) || format;
   downloadBlob(await renderDocumentBlob(editor, format, meta), `${name}.${ext}`);
 }
 

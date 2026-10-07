@@ -9,6 +9,8 @@ import { confirmDialog } from './dialog.js';
 
 const EXPORT_HINTS = {
   docx: 'Opens in Microsoft Word, Google Docs, LibreOffice and Pages',
+  odt: 'The open standard: LibreOffice, Collabora, Google Docs and Word',
+  rtf: 'Opens almost anywhere, including WordPad and TextEdit',
   pdf: 'Print to PDF — keeps layout, fonts and page numbers',
   html: 'A single self-contained web page',
   md: 'Plain-text formatting for notes, wikis and GitHub',

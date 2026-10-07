@@ -1,6 +1,96 @@
 import DOMPurify from 'dompurify';
 
-export const IMPORT_ACCEPT = '.docx,.md,.markdown,.txt,.html,.htm,.rtf';
+/**
+ * Every format LibreWord opens, by extension. `kind` picks the reader. The
+ * MIME types feed the file picker (some systems filter by type, others by
+ * extension, so both are listed).
+ */
+export const OPEN_FORMATS = {
+  docx: { kind: 'docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+  docm: { kind: 'docx', mime: 'application/vnd.ms-word.document.macroEnabled.12' },
+  dotx: { kind: 'docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.template' },
+  dotm: { kind: 'docx', mime: 'application/vnd.ms-word.template.macroEnabled.12' },
+  doc: { kind: 'doc', mime: 'application/msword' },
+  dot: { kind: 'doc', mime: 'application/msword' },
+  odt: { kind: 'odt', mime: 'application/vnd.oasis.opendocument.text' },
+  ott: { kind: 'odt', mime: 'application/vnd.oasis.opendocument.text-template' },
+  fodt: { kind: 'odt', mime: 'application/vnd.oasis.opendocument.text-flat-xml' },
+  rtf: { kind: 'rtf', mime: 'application/rtf' },
+  md: { kind: 'md', mime: 'text/markdown' },
+  markdown: { kind: 'md', mime: 'text/markdown' },
+  mdown: { kind: 'md', mime: 'text/markdown' },
+  mkd: { kind: 'md', mime: 'text/markdown' },
+  html: { kind: 'html', mime: 'text/html' },
+  htm: { kind: 'html', mime: 'text/html' },
+  xhtml: { kind: 'html', mime: 'application/xhtml+xml' },
+  txt: { kind: 'txt', mime: 'text/plain' },
+  text: { kind: 'txt', mime: 'text/plain' },
+  log: { kind: 'txt', mime: 'text/plain' },
+};
+export const IMPORT_ACCEPT = Object.keys(OPEN_FORMATS).map((e) => `.${e}`).join(',');
+export const extOf = (name = '') => (String(name).match(/\.([^./\\]+)$/)?.[1] || '').toLowerCase();
+/** Can LibreWord open this file (by name)? */
+export const canOpen = (name) => Boolean(OPEN_FORMATS[extOf(name)]);
+
+/** What to tell people about common files LibreWord can't open. */
+const NOT_SUPPORTED = {
+  pdf: 'PDF files can’t be edited in LibreWord. If you have the original document (.docx, .odt…), open that instead.',
+  pages: 'Apple Pages files can’t be opened. In Pages, choose File › Export To › Word, then open the .docx.',
+  wps: 'Microsoft Works files can’t be opened. Save the file as .docx or .rtf first.',
+  wpd: 'WordPerfect files can’t be opened. Save the file as .docx, .odt or .rtf first.',
+  xls: 'That’s a spreadsheet. LibreWord opens text documents.', xlsx: 'That’s a spreadsheet. LibreWord opens text documents.', ods: 'That’s a spreadsheet. LibreWord opens text documents.', csv: 'That’s a spreadsheet. LibreWord opens text documents.',
+  ppt: 'That’s a presentation. LibreWord opens text documents.', pptx: 'That’s a presentation. LibreWord opens text documents.', odp: 'That’s a presentation. LibreWord opens text documents.',
+};
+
+/**
+ * Decode a text file: byte-order marks (UTF-8, UTF-16), UTF-16 without one,
+ * then UTF-8, falling back to Windows-1252 for older files from Windows.
+ * For HTML, a declared <meta charset> wins.
+ */
+export function decodeText(buffer, { html = false } = {}) {
+  const b = new Uint8Array(buffer);
+  const decode = (enc, from = 0) => new TextDecoder(enc).decode(b.subarray(from));
+  if (b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf) return decode('utf-8', 3);
+  if (b[0] === 0xff && b[1] === 0xfe) return decode('utf-16le', 2);
+  if (b[0] === 0xfe && b[1] === 0xff) return decode('utf-16be', 2);
+  // UTF-16 without a BOM: mostly-ASCII text has a zero in every other byte.
+  const n = Math.min(b.length, 2000) & ~1;
+  if (n >= 4) {
+    let even = 0;
+    let odd = 0;
+    for (let i = 0; i < n; i += 2) {
+      if (b[i] === 0) even++;
+      if (b[i + 1] === 0) odd++;
+    }
+    if (odd > n / 4 && even < n / 40) return decode('utf-16le');
+    if (even > n / 4 && odd < n / 40) return decode('utf-16be');
+  }
+  if (html) {
+    const head = new TextDecoder('latin1').decode(b.subarray(0, 2048));
+    const charset = /<meta[^>]+charset\s*=\s*["']?([\w-]+)/i.exec(head)?.[1];
+    if (charset && !/^utf-?8$/i.test(charset)) {
+      try {
+        return decode(charset);
+      } catch { /* unknown label: carry on */ }
+    }
+  }
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(b);
+  } catch {
+    return windows1252(b);
+  }
+}
+
+// Windows-1252 differs from Latin-1 only in 0x80–0x9F (€, curly quotes, dashes…).
+// Decoded by hand: some TextDecoder implementations (Node's) treat the label as Latin-1.
+const CP1252 = '€\u0081‚ƒ„…†‡ˆ‰Š‹Œ\u008DŽ\u008F\u0090‘’“”•–—˜™š›œ\u009DžŸ';
+function windows1252(bytes) {
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 8192) {
+    out += String.fromCharCode(...bytes.subarray(i, i + 8192)).replace(/[\x80-\x9f]/g, (c) => CP1252[c.charCodeAt(0) - 0x80]);
+  }
+  return out;
+}
 
 export function sanitizeHtml(html) {
   return DOMPurify.sanitize(String(html || ''), {
@@ -183,24 +273,43 @@ const stripExtension = (name) => name.replace(/\.[^.]+$/, '') || name;
 /** Convert a File into { title, html, settings?, comments? } for a new document. */
 export async function importFile(file) {
   const name = file.name || 'Imported document';
-  const ext = (name.match(/\.([^.]+)$/)?.[1] || '').toLowerCase();
+  const ext = extOf(name);
+  // The file name wins over titles stored inside documents: those are often left over from a template.
   const title = stripExtension(name);
-  if (ext === 'docx') {
-    const r = await importDocx(await file.arrayBuffer());
-    // The file name wins: Word's stored title is often left over from a template.
-    return { title, html: preserveSpaces(r.html), settings: r.settings, comments: r.comments };
+  const kind = OPEN_FORMATS[ext]?.kind || (file.type?.startsWith('text/') && !NOT_SUPPORTED[ext] ? 'txt' : null);
+  switch (kind) {
+    case 'docx': {
+      const r = await importDocx(await file.arrayBuffer());
+      return { title, html: preserveSpaces(r.html), settings: r.settings, comments: r.comments };
+    }
+    case 'odt': {
+      const { readOdt } = await import('./odt.js');
+      const r = await readOdt(await file.arrayBuffer());
+      return { title, html: preserveSpaces(sanitizeHtml(r.html)), settings: r.settings, comments: r.comments };
+    }
+    case 'doc': {
+      const { readDoc } = await import('./doc-import.js');
+      const r = await readDoc(await file.arrayBuffer());
+      return { title, html: preserveSpaces(sanitizeHtml(r.html)) };
+    }
+    case 'rtf': {
+      const { rtfToHtml } = await import('./rtf.js');
+      const r = rtfToHtml(decodeText(await file.arrayBuffer()));
+      return { title, html: preserveSpaces(sanitizeHtml(r.html)) };
+    }
+    case 'md':
+      return { title, html: await markdownToHtml(decodeText(await file.arrayBuffer())) };
+    case 'html': {
+      const raw = decodeText(await file.arrayBuffer(), { html: true });
+      const doc = new DOMParser().parseFromString(raw, 'text/html');
+      const docTitle = doc.querySelector('title')?.textContent?.trim();
+      const ours = doc.querySelector('meta[name="generator"]')?.content === 'LibreWord';
+      const html = sanitizeHtml(doc.body.innerHTML);
+      return { title: docTitle || title, html: ours ? preserveSpaces(html) : html };
+    }
+    case 'txt':
+      return { title, html: preserveSpaces(textToHtml(decodeText(await file.arrayBuffer()))) };
+    default:
+      throw new Error(NOT_SUPPORTED[ext] || `LibreWord can’t open .${ext || '?'} files. It opens Word (.docx, .doc), OpenDocument (.odt), RTF, Markdown, HTML and text files.`);
   }
-  if (ext === 'md' || ext === 'markdown') return { title, html: await markdownToHtml(await file.text()) };
-  if (ext === 'html' || ext === 'htm') {
-    const raw = await file.text();
-    const doc = new DOMParser().parseFromString(raw, 'text/html');
-    const docTitle = doc.querySelector('title')?.textContent?.trim();
-    const ours = doc.querySelector('meta[name="generator"]')?.content === 'LibreWord';
-    const html = sanitizeHtml(doc.body.innerHTML);
-    return { title: docTitle || title, html: ours ? preserveSpaces(html) : html };
-  }
-  if (ext === 'rtf') return { title, html: preserveSpaces(textToHtml(rtfToText(await file.text()))) };
-  if (ext === 'txt' || file.type.startsWith('text/')) return { title, html: preserveSpaces(textToHtml(await file.text())) };
-  if (ext === 'doc') throw new Error('Legacy .doc files are not supported. Save the file as .docx in Word and try again.');
-  throw new Error(`Unsupported file type: .${ext || '?'}`);
 }

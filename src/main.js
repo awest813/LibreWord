@@ -1,6 +1,6 @@
 import './styles/app.css';
 import { createDoc, findDocByFile, saveDoc, getDoc, addVersion } from './storage/db.js';
-import { importFile } from './io/import.js';
+import { importFile, extOf } from './io/import.js';
 import { pickFileToOpen, formatOfName, handleFromDataTransfer } from './io/file-access.js';
 import { renderStartScreen } from './ui/start.js';
 import { toast, h } from './ui/dom.js';
@@ -59,13 +59,24 @@ async function importAndOpen(file, handle = null, { show = true } = {}) {
       toast(`“${file.name}” changed on disk. Your unsaved version was kept as “${existing.title} (unsaved changes)”.`, { timeout: 7000 });
     }
     const id = await createDoc({ title, html, settings: settings || {}, comments: comments || {}, file: link });
-    if (show) toast(link ? `Opened “${file.name}” — Save writes your changes back to it` : `Opened a copy of “${file.name}”`, { type: 'success', timeout: 4000 });
+    if (show) toast(openedMessage(file.name, link, handle), { type: 'success', timeout: link ? 4000 : 7000 });
     return open(id);
   } catch (err) {
     console.error(err);
     toast(`${file.name}: ${err.message || 'Could not open that file.'}`, { type: 'error', timeout: 6000 });
     return null;
   }
+}
+
+/** What opening a file did: linked to it, or opened as a copy (and why). */
+function openedMessage(name, link, handle) {
+  if (link) return `Opened “${name}” — Save writes your changes back to it`;
+  const ext = extOf(name);
+  if (/^(dotx|dotm|ott|dot)$/.test(ext)) return `New document from the template “${name}”`;
+  if (handle && /^(doc|docm|fodt)$/.test(ext)) {
+    return `Opened “${name}”. LibreWord can’t save .${ext} files, so Save As saves it as a Word document (.docx) or OpenDocument (.odt).`;
+  }
+  return `Opened a copy of “${name}”`;
 }
 
 async function openFromDevice() {
@@ -197,7 +208,7 @@ window.addEventListener('drop', (e) => {
     e.preventDefault();
     // As if dropped at the cursor: pictures are inserted there, documents opened.
     if (!screen.handleFiles(e.dataTransfer.files, screen.editor.state.selection.head, e.dataTransfer)) {
-      toast('LibreWord can open Word, Markdown, text, HTML and RTF files, and insert pictures.', { type: 'error' });
+      toast('LibreWord opens Word, OpenDocument, RTF, Markdown, HTML and text files, and inserts pictures.', { type: 'error' });
     }
     return;
   }

@@ -266,7 +266,11 @@ describe('file names', async () => {
     expect(formatOfName('Report.DOCX')).toBe('docx');
     expect(formatOfName('x.markdown')).toBe('md');
     expect(formatOfName('page.htm')).toBe('html');
-    expect(formatOfName('old.rtf')).toBeNull();
+    expect(formatOfName('old.rtf')).toBe('rtf');
+    expect(formatOfName('letter.odt')).toBe('odt');
+    // Read-only formats open as copies.
+    expect(formatOfName('legacy.doc')).toBeNull();
+    expect(formatOfName('template.dotx')).toBeNull();
   });
 });
 

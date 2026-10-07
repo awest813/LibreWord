@@ -11,6 +11,8 @@ import assert from 'node:assert/strict';
 import mammoth from 'mammoth';
 import { Document, Packer, Paragraph, TextRun } from 'docx';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import JSZip from 'jszip';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startPreview, LAUNCH } from './server.mjs';
@@ -279,6 +281,100 @@ await test('Open with LibreWord: several files open the first and list the rest'
   await page.waitForSelector('.doc-row');
   const titles = await page.$$eval('.doc-row', (rows) => rows.map((r) => r.textContent));
   assert.ok(titles.some((t) => t.includes('launch-b')), `launch-b missing from ${titles.join(' | ')}`);
+});
+
+const goHome = async () => {
+  await page.click('.app-logo');
+  await page.waitForSelector('.template-card');
+};
+const openFromPicker = async (name) => {
+  await goHome();
+  await page.evaluate((n) => { window.__nextOpen = n; }, name);
+  await page.click('.template-card.is-import');
+  await editorReady();
+};
+const editorText = () => page.evaluate(() => window.libreword.editor.getText());
+
+await test('OpenDocument: opens an .odt from LibreOffice, saves back to it and Save As writes .odt', async () => {
+  await putFile('sample.odt', readFileSync('tests/fixtures/odt/sample.odt'));
+  await openFromPicker('sample.odt');
+  await page.waitForFunction(() => window.libreword.editor.getText().includes('Quarterly Notes'));
+  const html = await page.evaluate(() => window.libreword.editor.getHTML());
+  assert.match(html, /<h1[^>]*>Quarterly Notes<\/h1>/);
+  assert.match(html, /<strong>bold<\/strong>/);
+  assert.match(html, /<ul>/);
+  assert.match(html, /<th[^>]*>.*Item/s);
+  assert.match(await chip(), /sample\.odt/);
+  await page.evaluate(() => window.libreword.editor.chain().focus('end').insertContent({ type: 'paragraph', content: [{ type: 'text', text: 'Edited in LibreWord' }] }).run());
+  await page.keyboard.press('Control+s');
+  await page.waitForFunction(() => !window.libreword.screen.fileDirty);
+  const saved = await JSZip.loadAsync(Buffer.from((await readFile('sample.odt')).bytes));
+  assert.equal(await saved.file('mimetype').async('string'), 'application/vnd.oasis.opendocument.text');
+  const content = await saved.file('content.xml').async('string');
+  assert.match(content, /Edited in LibreWord/);
+  assert.match(content, /Quarterly Notes/);
+  // Save As to a new .odt keeps saving there.
+  await page.evaluate(() => { window.__nextSave = 'copy.odt'; });
+  await page.keyboard.press('Control+Shift+s');
+  await page.waitForFunction(() => window.libreword.screen.file?.name === 'copy.odt' && !window.libreword.screen.fileDirty);
+  const copy = await JSZip.loadAsync(Buffer.from((await readFile('copy.odt')).bytes));
+  assert.match(await copy.file('content.xml').async('string'), /Edited in LibreWord/);
+});
+
+await test('Rich Text: opens with formatting and saves back as .rtf after the one-time notice', async () => {
+  await putFile('letter.rtf', Buffer.from('{\\rtf1\\ansi\\ansicpg1252{\\fonttbl{\\f0 Arial;}}\\f0\\fs24 Dear {\\b Ada},\\par Caf\\\'e9 at {\\i noon}.\\par}'));
+  await openFromPicker('letter.rtf');
+  await page.waitForFunction(() => window.libreword.editor.getText().includes('Dear'));
+  const html = await page.evaluate(() => window.libreword.editor.getHTML());
+  assert.match(html, /<strong>Ada<\/strong>/);
+  assert.match(html, /Café/);
+  assert.match(html, /<em>noon<\/em>/);
+  assert.match(await chip(), /letter\.rtf/);
+  await page.evaluate(() => window.libreword.editor.chain().focus('end').insertContent(' Bye!').run());
+  await page.keyboard.press('Control+s');
+  await page.waitForSelector('dialog[open]');
+  assert.match(await page.textContent('dialog[open]'), /Rich Text/);
+  await page.click('dialog[open] .btn-primary');
+  await page.waitForFunction(() => !window.libreword.screen.fileDirty);
+  const rtf = (await readFile('letter.rtf')).text;
+  assert.match(rtf, /^\{\\rtf1/);
+  assert.match(rtf, /Bye!/);
+  assert.match(rtf, /\\b\b/);
+});
+
+await test('Word 97–2003: opens a .doc, explains it can’t save back, and Save As writes .docx', async () => {
+  await putFile('formatting.doc', readFileSync('tests/fixtures/doc/formatting.doc'));
+  await openFromPicker('formatting.doc');
+  await page.waitForSelector('.toast:has-text("can’t save .doc files")');
+  const html = await page.evaluate(() => window.libreword.editor.getHTML());
+  assert.match(html, /<h1[^>]*>/);
+  assert.match(html, /<strong>/);
+  assert.equal(await page.isVisible('.file-chip'), false); // opened as a copy
+  await page.evaluate(() => { window.__nextSave = 'formatting.docx'; });
+  await page.keyboard.press('Control+Shift+s');
+  await page.waitForFunction(() => window.libreword.screen.file?.name === 'formatting.docx' && !window.libreword.screen.fileDirty);
+  const { value } = await mammoth.convertToHtml({ buffer: Buffer.from((await readFile('formatting.docx')).bytes) });
+  assert.match(value, /<h1>/);
+});
+
+await test('text files in UTF-16 and Windows-1252 open with the right characters', async () => {
+  const utf16 = Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('Grüße aus Köln — 東京\r\nline two', 'utf16le')]);
+  await putFile('utf16.txt', utf16);
+  await openFromPicker('utf16.txt');
+  await page.waitForFunction(() => window.libreword.editor.getText().includes('line two'));
+  assert.equal(await page.evaluate(() => window.libreword.editor.getText({ blockSeparator: '|' })), 'Grüße aus Köln — 東京|line two');
+  await putFile('ansi.txt', Buffer.from([0x43, 0x61, 0x66, 0xe9, 0x20, 0x80, 0x35, 0x20, 0x93, 0x71, 0x94]));
+  await openFromPicker('ansi.txt');
+  await page.waitForFunction(() => window.libreword.editor.getText().includes('Caf'));
+  assert.equal(await editorText(), 'Café €5 “q”');
+});
+
+await test('unsupported files say what to do instead', async () => {
+  await putFile('scan.pdf', Buffer.from('%PDF-1.4'));
+  await goHome();
+  await page.evaluate(() => { window.__nextOpen = 'scan.pdf'; });
+  await page.click('.template-card.is-import');
+  await page.waitForSelector('.toast:has-text("PDF files can’t be edited")');
 });
 
 await test('no runtime errors', async () => {

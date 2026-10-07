@@ -384,6 +384,15 @@ class OdtReader {
     collect(el, false);
     const tableName = attr(el, 'table', 'style-name');
     const breakBefore = this.sheet.props('table', tableName, 'table')['fo:break-before'] === 'page';
+    // LibreOffice marks header cells by their "Table Heading" paragraphs, not always with header rows.
+    const headingRow = (row) => {
+      const cells = kids(row).filter((c) => is(c, 'table', 'table-cell'));
+      return cells.length > 0 && cells.every((c) => {
+        const paras = kids(c).filter((p) => is(p, 'text', 'p'));
+        return paras.length > 0 && paras.every((p) => this.sheet.names('paragraph', attr(p, 'text', 'style-name')).includes('table heading'));
+      });
+    };
+    for (let i = 0; i < rows.length - 1 && !rows[i].header && headingRow(rows[i].el); i++) rows[i].header = true;
     let html = breakBefore ? '<div data-page-break></div><table>' : '<table>';
     for (const { el: row, header } of rows) {
       html += '<tr>';
