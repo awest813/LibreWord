@@ -82,6 +82,20 @@ await test('start screen renders templates', async () => {
   assert.ok((await page.$$('.template-card')).length >= 6);
 });
 
+await test('Install app button appears when the browser offers installation', async () => {
+  assert.equal(await page.isVisible('.titlebar-btn'), false);
+  await page.evaluate(() => {
+    const e = new Event('beforeinstallprompt', { cancelable: true });
+    e.prompt = () => { window.__installPrompted = true; };
+    e.userChoice = Promise.resolve({ outcome: 'accepted' });
+    window.dispatchEvent(e);
+  });
+  await page.click('.titlebar-btn');
+  assert.equal(await page.evaluate(() => window.__installPrompted), true);
+  // The prompt can be shown once; the button hides until the browser offers it again.
+  await page.waitForSelector('.titlebar-btn', { state: 'hidden' });
+});
+
 await test('create a blank document and type with formatting', async () => {
   await page.click('.template-card >> nth=0');
   await editorReady();

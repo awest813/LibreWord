@@ -457,8 +457,11 @@ export class EditorScreen {
   }
 
   onDocChange(transaction) {
-    // Plugin housekeeping (e.g. the trailing paragraph) isn't a user edit.
-    if (!transaction?.getMeta('appendedTransaction')) {
+    // Plugin housekeeping (e.g. the trailing paragraph) isn't a user edit. TipTap
+    // reports the transaction that was dispatched, so housekeeping appended to a
+    // non-editing one (focusing a document that ends in a heading) shows up as
+    // an update whose own transaction changed nothing.
+    if (!transaction || (transaction.docChanged && !transaction.getMeta('appendedTransaction'))) {
       this.userEdited = true;
       this.markFileDirty();
     }

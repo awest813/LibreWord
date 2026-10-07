@@ -5,6 +5,7 @@ import { pickFileToOpen, formatOfName, handleFromDataTransfer } from './io/file-
 import { renderStartScreen } from './ui/start.js';
 import { toast, h } from './ui/dom.js';
 import { toggleTheme, syncThemeColor } from './ui/theme.js';
+import { initInstall, isChromeOS } from './ui/install.js';
 
 const root = document.getElementById('app');
 let screen = null; // current EditorScreen
@@ -23,9 +24,15 @@ async function newFromTemplate(t) {
 
 /**
  * Open a file from the device. With a file handle (Chromium), the document
- * stays linked to the file so Save writes back to it.
+ * stays linked to the file so Save writes back to it. With `show: false` the
+ * file is added to the document list without switching to it. Resolves to the
+ * document id, or null if the file couldn't be read.
  */
-async function importAndOpen(file, handle = null) {
+async function importAndOpen(file, handle = null, { show = true } = {}) {
+  const open = (id) => {
+    if (show) go(`#/doc/${id}`);
+    return id;
+  };
   try {
     const format = handle ? formatOfName(file.name) : null;
     const existing = handle && format ? await findDocByFile(handle) : null;
@@ -33,8 +40,7 @@ async function importAndOpen(file, handle = null) {
       // Re-opening a file we already have, unchanged on disk: reuse that
       // document (it keeps comments, history and anything the file format
       // can't store, plus any edits not yet saved to the file).
-      go(`#/doc/${existing.id}`);
-      return;
+      return open(existing.id);
     }
     const { title, html, settings, comments } = await importFile(file);
     const link = handle && format ? { handle, name: file.name, format, lastModified: file.lastModified, unsaved: false } : null;
@@ -44,9 +50,8 @@ async function importAndOpen(file, handle = null) {
       const old = await getDoc(existing.id);
       await addVersion(existing.id, { title: old.title, json: old.json, html: old.html, settings: old.settings, comments: old.comments, words: old.words, reason: 'before-reload' });
       await saveDoc(existing.id, { html, settings: { ...old.settings, ...settings }, comments: comments || {}, file: link });
-      go(`#/doc/${existing.id}`);
       toast(`Reloaded “${file.name}”, which changed on disk`, { type: 'success' });
-      return;
+      return open(existing.id);
     }
     if (existing) {
       // Both changed: keep our unsaved version as its own document, and link the file to a fresh import.
@@ -54,12 +59,18 @@ async function importAndOpen(file, handle = null) {
       toast(`“${file.name}” changed on disk. Your unsaved version was kept as “${existing.title} (unsaved changes)”.`, { timeout: 7000 });
     }
     const id = await createDoc({ title, html, settings: settings || {}, comments: comments || {}, file: link });
-    go(`#/doc/${id}`);
-    toast(link ? `Opened “${file.name}” — Save writes your changes back to it` : `Opened a copy of “${file.name}”`, { type: 'success', timeout: 4000 });
+    if (show) toast(link ? `Opened “${file.name}” — Save writes your changes back to it` : `Opened a copy of “${file.name}”`, { type: 'success', timeout: 4000 });
+    return open(id);
   } catch (err) {
     console.error(err);
-    toast(err.message || 'Could not open that file.', { type: 'error', timeout: 6000 });
+    toast(`${file.name}: ${err.message || 'Could not open that file.'}`, { type: 'error', timeout: 6000 });
+    return null;
   }
+}
+
+async function openFromDevice() {
+  const picked = await pickFileToOpen();
+  if (picked) importAndOpen(picked.file, picked.handle);
 }
 
 const prefetchEditor = () => import('./ui/editor-screen.js').catch(() => {});
@@ -71,10 +82,7 @@ async function showStart() {
   renderStartScreen(root, {
     onOpen: (id) => go(`#/doc/${id}`),
     onTemplate: newFromTemplate,
-    onImport: async () => {
-      const picked = await pickFileToOpen();
-      if (picked) importAndOpen(picked.file, picked.handle);
-    },
+    onImport: openFromDevice,
     onToggleTheme: toggleTheme,
   });
 }
@@ -180,14 +188,48 @@ window.addEventListener('drop', (e) => {
   if (file) handlePromise.then((handle) => importAndOpen(file, handle?.kind === 'file' ? handle : null));
 });
 
-// Files opened through the installed PWA's file handler ("Open with LibreWord").
+// Files opened through the installed app's file handler: "Open with LibreWord"
+// in the Chromebook Files app, or double-clicking a file once LibreWord is the
+// default app for it. Several files at once open the first and add the rest to
+// the document list.
 if ('launchQueue' in window) {
   window.launchQueue.setConsumer(async (params) => {
-    for (const handle of params.files || []) {
-      importAndOpen(await handle.getFile(), handle);
+    const handles = (params.files || []).filter((f) => f.kind === 'file');
+    let shown = false;
+    let added = 0;
+    for (const handle of handles) {
+      let file;
+      try {
+        file = await handle.getFile();
+      } catch (err) {
+        toast(`Couldn't read “${handle.name}”: ${err.message || err}`, { type: 'error', timeout: 6000 });
+        continue;
+      }
+      const id = await importAndOpen(file, handle, { show: !shown });
+      if (id && shown) added++;
+      if (id) shown = true;
     }
+    if (added) toast(`${added} more file${added === 1 ? ' was' : 's were'} added to your Recent documents.`, { timeout: 6000 });
   });
 }
+
+// Ctrl+O on the start screen (the editor handles its own shortcuts). Without
+// this, an installed app window would hand Ctrl+O to the browser instead.
+window.addEventListener('keydown', (e) => {
+  if (screen || !(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== 'o') return;
+  if (document.querySelector('dialog[open]')) return;
+  e.preventDefault();
+  openFromDevice();
+});
+
+initInstall({
+  onInstalled: () => toast(
+    isChromeOS()
+      ? 'LibreWord is installed. Open it from the Launcher, or right-click a document in the Files app and choose Open with → LibreWord.'
+      : 'LibreWord is installed. You can open it from your apps, and open documents with it from your file manager.',
+    { type: 'success', timeout: 9000 },
+  ),
+});
 
 // Service worker: offline support once installed. Registered after load so it
 // never competes with the first paint.

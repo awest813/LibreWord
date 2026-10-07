@@ -30,14 +30,17 @@ export default defineConfig({
           { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' },
           { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
+        // "Open with LibreWord" in the Chromebook Files app (and the desktop file
+        // manager on Windows, macOS and Linux) once the app is installed.
         file_handlers: [
           {
             action: './',
             accept: {
               'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
-              'text/markdown': ['.md'],
+              'text/markdown': ['.md', '.markdown'],
               'text/plain': ['.txt'],
               'text/html': ['.html', '.htm'],
+              'application/rtf': ['.rtf'],
             },
           },
         ],

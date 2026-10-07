@@ -29,6 +29,21 @@ LibreWord looks and works like a desktop word processor: a ribbon, real pages wi
 
 Keyboard shortcuts follow Word (Ctrl+B/I/U, Ctrl+L/E/R/J, Ctrl+Enter, Ctrl+K, Ctrl+]/[, Shift+F3, Ctrl+Alt+1…6, Ctrl+F/H, Ctrl+S, Ctrl+P…). Press **Ctrl+/** in the editor for the full list.
 
+## Using LibreWord on a Chromebook
+
+LibreWord runs in Chrome, so it works on any Chromebook with nothing to set up beyond installing it from wherever it is hosted (for example the GitHub Pages site this repository deploys).
+
+1. **Install it.** Open LibreWord in Chrome and click **Install app** in the top-right corner of the start screen (or the install icon at the right of the address bar, or ⋮ → *Cast, save and share* → *Install page as app*). It gets its own window and a Launcher icon, and from then on it works fully offline.
+2. **Open documents from the Files app.** Right-click a `.docx`, `.md`, `.txt`, `.html` or `.rtf` file → **Open with** → **LibreWord**. To open `.docx` files with LibreWord every time, choose *Open with* → *Change default…*. This works for files in *My files*, *Downloads*, Google Drive, USB drives and the Linux files folder. You can also click **Open from device…** in LibreWord or press **Ctrl+O**, or drag a file onto the window.
+3. **Save back to the same file.** A document opened this way stays linked to its file: **Ctrl+S** writes your changes back to it, in its own format. The first save after restarting may ask you to allow LibreWord to edit the file. **Ctrl+Shift+S** saves somewhere new, and new documents ask where to save the first time you use Save As.
+4. **Nothing is lost if you forget.** Every change is also kept inside LibreWord automatically, and LibreWord asks before closing a document with changes not yet saved to its file. Use **File → Info** to see where a document is saved.
+
+Tips:
+
+- Chromebook keyboards have no F1–F12 keys. For shortcuts like **Shift+F3** (change case) or **F7** (spelling), hold **Search** (or **Launcher**) and press the matching top-row key, or turn on *Treat top-row keys as function keys* in the keyboard settings. Press **Ctrl+/** in LibreWord for the full list.
+- Documents use Calibri by default; ChromeOS substitutes Carlito, which has the same letter widths, so line and page breaks closely match what Word shows.
+- Documents kept inside LibreWord live in Chrome's storage for the app. Clearing browsing data for the site (or ticking *Also clear data* when removing the app) deletes them, so save the ones you care about to files, or use **Back Up All Documents** (the ⋯ menu next to *Recent*) now and then.
+
 ## Performance
 
 Pagination is incremental: after an edit LibreWord re-measures only from the changed block and stops as soon as the layout converges with the previous pass. On a 100-page document (`npm run bench`):
@@ -98,8 +113,6 @@ tests/
   e2e/                     Playwright smoke tests and benchmark
   fixtures/word/           Word-authored sample documents (from mammoth.js, BSD-2)
 ```
-
-The previous Quill/Express implementation lives in `client/` and `server/`; it is no longer used by the build and can be deleted.
 
 ## Privacy
 

@@ -60,6 +60,8 @@ await page.addInitScript(() => {
     window.__lastSuggested = suggestedName;
     return dir.getFileHandle(window.__nextSave, { create: true });
   };
+  // "Open with LibreWord" from the OS file manager arrives through launchQueue.
+  Object.defineProperty(window, 'launchQueue', { configurable: true, value: { setConsumer: (fn) => { window.__launch = fn; } } });
 });
 
 const putFile = (name, bytes) => page.evaluate(async ({ name, bytes }) => {
@@ -247,6 +249,36 @@ await test('reopening a file that changed on disk refreshes the same document', 
   await page.click('.app-logo');
   await page.waitForSelector('.doc-row');
   assert.equal(await page.$$eval('.doc-row', (r) => r.length), rows);
+});
+
+await test('Ctrl+O on the start screen opens a file', async () => {
+  await page.click('.app-logo');
+  await page.waitForSelector('.template-card');
+  await putFile('shortcut.md', Buffer.from('# Opened with Ctrl+O\n'));
+  await page.evaluate(() => { window.__nextOpen = 'shortcut.md'; });
+  await page.keyboard.press('Control+o');
+  await page.waitForFunction(() => { const ed = window.libreword?.editor; return ed && !ed.isDestroyed && ed.getText().includes('Opened with Ctrl+O'); });
+  assert.match(await chip(), /shortcut\.md/);
+  // A file that ends in a heading gets a trailing paragraph on focus; that isn't an unsaved change.
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => window.libreword.screen.fileDirty), false);
+});
+
+await test('Open with LibreWord: several files open the first and list the rest', async () => {
+  await page.click('.app-logo');
+  await page.waitForSelector('.template-card');
+  await putFile('launch-a.md', Buffer.from('First launched file\n'));
+  await putFile('launch-b.txt', Buffer.from('Second launched file\n'));
+  await page.evaluate(async () => {
+    const dir = await navigator.storage.getDirectory();
+    await window.__launch({ files: [await dir.getFileHandle('launch-a.md'), await dir.getFileHandle('launch-b.txt')] });
+  });
+  await page.waitForFunction(() => { const ed = window.libreword?.editor; return ed && !ed.isDestroyed && ed.getText().includes('First launched file'); });
+  assert.match(await chip(), /launch-a\.md/);
+  await page.click('.app-logo');
+  await page.waitForSelector('.doc-row');
+  const titles = await page.$$eval('.doc-row', (rows) => rows.map((r) => r.textContent));
+  assert.ok(titles.some((t) => t.includes('launch-b')), `launch-b missing from ${titles.join(' | ')}`);
 });
 
 await test('no runtime errors', async () => {

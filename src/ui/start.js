@@ -4,6 +4,7 @@ import { listDocs, deleteDoc, duplicateDoc, renameDoc, exportBackup, importBacku
 import { TEMPLATES } from '../templates.js';
 import { sanitizeHtml, IMPORT_ACCEPT } from '../io/import.js';
 import { confirmDialog, promptDialog } from './dialog.js';
+import { onInstallable, promptInstall } from './install.js';
 
 export function templateCards({ onTemplate, onImport }) {
   const row = h('div', { class: 'template-row' });
@@ -168,6 +169,13 @@ export function documentList({ onOpen, compact = false, currentId = null, onRena
 
 export function renderStartScreen(root, { onOpen, onTemplate, onImport, onToggleTheme }) {
   const list = documentList({ onOpen });
+  // Shown only when the browser says LibreWord can be installed (Chrome, Edge, Chromebooks).
+  const installBtn = h('button', {
+    type: 'button', class: 'titlebar-btn', hidden: true,
+    title: 'Install LibreWord as an app: it gets its own window, works offline and can open files from your Files app',
+    html: `${icon('download')}<span>Install app</span>`,
+    onclick: () => promptInstall(),
+  });
   const screen = h(
     'div',
     { class: 'start-screen' },
@@ -177,7 +185,7 @@ export function renderStartScreen(root, { onOpen, onTemplate, onImport, onToggle
       h('span', { class: 'app-logo', html: '<svg width="26" height="26" viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="10" fill="#fff"/><path d="M12 14h4.2l3.3 14.4L23.2 14h3.6l3.7 14.4L33.8 14H38l-5.6 20h-3.9L25 20.6 21.5 34h-3.9z" fill="#185abd"/></svg>' }),
       h('strong', { style: { fontSize: '15px' } }, 'LibreWord'),
       h('div', { style: { flex: 1 } }),
-      h('div', { class: 'titlebar-right' }, h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Toggle dark mode', title: 'Toggle dark mode', html: icon('moon'), onclick: onToggleTheme })),
+      h('div', { class: 'titlebar-right' }, installBtn, h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Toggle dark mode', title: 'Toggle dark mode', html: icon('moon'), onclick: onToggleTheme })),
     ),
     h(
       'div',
@@ -192,5 +200,9 @@ export function renderStartScreen(root, { onOpen, onTemplate, onImport, onToggle
     ),
   );
   root.replaceChildren(screen);
+  const unsubscribe = onInstallable((can) => {
+    if (!installBtn.isConnected) unsubscribe?.();
+    else installBtn.hidden = !can;
+  });
   return { refresh: list.refresh };
 }

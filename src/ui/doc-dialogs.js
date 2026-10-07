@@ -3,6 +3,7 @@ import { openDialog, promptDialog } from './dialog.js';
 import { PAGE_SIZES } from '../editor/page-setup.js';
 import { units } from './editor-screen.js';
 import { countWords } from '../editor/word-commands.js';
+import { isChromeOS } from './install.js';
 
 const num = (v, fallback = 0) => {
   const n = parseFloat(v);
@@ -116,10 +117,15 @@ const SHORTCUTS = [
 ];
 
 export function shortcutsDialog() {
+  const table = h('table', { class: 'shortcut-table' }, ...SHORTCUTS.map(([label, keys]) => h('tr', {}, h('td', {}, label), h('td', {}, h('kbd', {}, shortcutLabel(keys))))));
+  // Chromebook keyboards have no F1–F12 row: the top-row keys are browser and system controls.
+  const chromebookNote = isChromeOS()
+    ? h('p', { class: 'shortcut-note' }, 'On a Chromebook, hold the Search (or Launcher) key and press a top-row key to get F1–F10, or turn on “Treat top-row keys as function keys” in your Chromebook’s keyboard settings. Ctrl+Space switches keyboard language if you have more than one, so use Clear Formatting on the Home tab instead.')
+    : null;
   return openDialog({
     title: 'Keyboard Shortcuts',
     className: 'wide',
-    body: h('table', { class: 'shortcut-table' }, ...SHORTCUTS.map(([label, keys]) => h('tr', {}, h('td', {}, label), h('td', {}, h('kbd', {}, shortcutLabel(keys)))))),
+    body: h('div', {}, chromebookNote, table),
   });
 }
 
