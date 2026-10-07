@@ -11,7 +11,8 @@ import {
 } from '../io/file-access.js';
 import { sanitizeHtml } from '../io/import.js';
 import { transformPastedHTML } from '../io/paste.js';
-import { h, toast, debounce, isPopoverOpen, closePopover, isMac, shortcutLabel } from './dom.js';
+import { commentRanges } from '../editor/comments.js';
+import { h, toast, debounce, isPopoverOpen, closePopover, isMac, shortcutLabel, setFocusFallback } from './dom.js';
 import { icon } from './icons.js';
 import { Ribbon } from './ribbon.js';
 import { FindPanel, NavPane, Ruler } from './panels.js';
@@ -143,6 +144,12 @@ export class EditorScreen {
       },
     });
     this.editorEl = this.editor.view.dom;
+    // Threads whose text was deleted are kept while editing, so undo can bring
+    // them back; a fresh session has no undo history, so drop them now.
+    const anchored = commentRanges(this.editor.state.doc);
+    if (Object.keys(this.comments).some((id) => !anchored.has(id))) {
+      this.comments = Object.fromEntries(Object.entries(this.comments).filter(([id]) => anchored.has(id)));
+    }
     // Double-clicking a page's top or bottom margin edits the header/footer, as in Word.
     this.editorEl.addEventListener('dblclick', (e) => {
       if (this.view.layout !== 'print') return;
@@ -177,6 +184,8 @@ export class EditorScreen {
     const onKey = (e) => this.handleKeydown(e);
     document.addEventListener('keydown', onKey, true);
     this.cleanups.push(() => document.removeEventListener('keydown', onKey, true));
+    setFocusFallback(() => !this.destroyed && this.editor.commands.focus());
+    this.cleanups.push(() => setFocusFallback(null));
 
     // Edits are always kept in the browser, but warn before leaving with
     // changes that haven't been written to the linked file yet.
@@ -471,6 +480,8 @@ export class EditorScreen {
     this.queueSave();
     this.statsDebounced();
     this.nav.refresh();
+    // Undo/redo can bring back or take away the only comment.
+    if (transaction?.getMeta('history$') && this.view.comments) this.commentsPane.el.hidden = !this.hasComments();
     this.commentsPane.refresh();
   }
 
@@ -1306,9 +1317,10 @@ export class EditorScreen {
   }
 
   deleteComment(id) {
+    // The thread itself stays (unlisted, since nothing in the document refers
+    // to it) so that undoing the deletion restores the comment, not just its
+    // highlight. Orphaned threads are dropped the next time the document opens.
     this.editor.commands.unsetComment(id);
-    const { [id]: _removed, ...rest } = this.comments;
-    this.comments = rest;
     this.commentsChanged();
   }
 
@@ -1373,6 +1385,18 @@ export class EditorScreen {
       this.ribbon.toggleCollapsed();
       return;
     }
+    // F6 (Ctrl+F6 where the browser keeps F6 for its address bar) moves between
+    // the document and the ribbon, the keyboard way out of the document, where
+    // Tab types a tab character.
+    if (e.key === 'F6' && !e.altKey) {
+      e.preventDefault();
+      if (this.editorEl.contains(document.activeElement)) {
+        this.ribbon.el.querySelector('.ribbon-tab[aria-selected="true"]')?.focus();
+      } else {
+        this.editor.view.focus();
+      }
+      return;
+    }
     if (e.key === 'F7') {
       e.preventDefault();
       this.toggleSpellcheck();
@@ -1396,7 +1420,6 @@ export class EditorScreen {
       g: () => (e.shiftKey ? this.wordCountDialog() : this.goToPageDialog()),
       '/': () => this.shortcutsDialog(),
       '?': () => this.shortcutsDialog(),
-      0: () => (e.altKey ? this.setZoom(1) : null),
     }[key];
     if (handled) {
       const r = handled();

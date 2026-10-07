@@ -113,7 +113,7 @@ const SHORTCUTS = [
   ['Bulleted list', 'Mod-Shift-8'], ['Numbered list', 'Mod-Shift-7'], ['Checklist', 'Mod-Shift-9'],
   ['Increase / decrease indent', 'Tab / Shift-Tab'], ['Line spacing 1 / 1.5 / 2', 'Mod-1 / 5 / 2'],
   ['Page break', 'Mod-Enter'], ['Line break', 'Shift-Enter'], ['Word count', 'Mod-Shift-G'], ['Spelling on / off', 'F7'],
-  ['Zoom', 'Ctrl + mouse wheel'], ['Collapse ribbon', 'Mod-F1'], ['Full screen', 'F11'], ['Keyboard shortcuts', 'Mod-/'],
+  ['Zoom', 'Ctrl + mouse wheel'], ['Collapse ribbon', 'Mod-F1'], ['Move between document and ribbon', 'F6 / Mod-F6'], ['Full screen', 'F11'], ['Keyboard shortcuts', 'Mod-/'],
 ];
 
 export function shortcutsDialog() {

@@ -145,7 +145,9 @@ export class CommentsPane {
       reply.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && reply.value.trim()) {
           e.preventDefault();
-          app.replyToComment(c.id, reply.value.trim());
+          const text = reply.value.trim();
+          reply.value = ''; // before the pane rebuilds and carries the box's text over
+          app.replyToComment(c.id, text);
         } else if (e.key === 'Escape') {
           reply.value = '';
           app.editor.commands.focus();

@@ -12,6 +12,24 @@ export function sanitizeHtml(html) {
   });
 }
 
+/**
+ * HTML collapses tabs, runs of spaces and leading spaces, but in a word
+ * processor they are content ("Name:<tab>Value", indented code). Mark the
+ * paragraphs that have any with white-space: pre-wrap, which the editor's
+ * parser honours, so they survive import. Only for sources where whitespace
+ * is meaningful: .docx, .txt and LibreWord's own HTML export, not arbitrary
+ * pretty-printed web pages.
+ */
+export function preserveSpaces(html) {
+  if (!/\t| {2}|> /.test(html)) return html;
+  const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
+  for (const el of doc.body.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, td, th')) {
+    if (/^(LI|TD|TH)$/.test(el.tagName) && ![...el.childNodes].some((n) => n.nodeType === 3 && n.nodeValue.trim())) continue;
+    if (/\t| {2}|^ /.test(el.textContent)) el.style.whiteSpace = 'pre-wrap';
+  }
+  return doc.body.innerHTML;
+}
+
 const escapeHtml = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
 export function textToHtml(text) {
@@ -170,17 +188,19 @@ export async function importFile(file) {
   if (ext === 'docx') {
     const r = await importDocx(await file.arrayBuffer());
     // The file name wins: Word's stored title is often left over from a template.
-    return { title, html: r.html, settings: r.settings, comments: r.comments };
+    return { title, html: preserveSpaces(r.html), settings: r.settings, comments: r.comments };
   }
   if (ext === 'md' || ext === 'markdown') return { title, html: await markdownToHtml(await file.text()) };
   if (ext === 'html' || ext === 'htm') {
     const raw = await file.text();
     const doc = new DOMParser().parseFromString(raw, 'text/html');
     const docTitle = doc.querySelector('title')?.textContent?.trim();
-    return { title: docTitle || title, html: sanitizeHtml(doc.body.innerHTML) };
+    const ours = doc.querySelector('meta[name="generator"]')?.content === 'LibreWord';
+    const html = sanitizeHtml(doc.body.innerHTML);
+    return { title: docTitle || title, html: ours ? preserveSpaces(html) : html };
   }
-  if (ext === 'rtf') return { title, html: textToHtml(rtfToText(await file.text())) };
-  if (ext === 'txt' || file.type.startsWith('text/')) return { title, html: textToHtml(await file.text()) };
+  if (ext === 'rtf') return { title, html: preserveSpaces(textToHtml(rtfToText(await file.text()))) };
+  if (ext === 'txt' || file.type.startsWith('text/')) return { title, html: preserveSpaces(textToHtml(await file.text())) };
   if (ext === 'doc') throw new Error('Legacy .doc files are not supported. Save the file as .docx in Word and try again.');
   throw new Error(`Unsupported file type: .${ext || '?'}`);
 }

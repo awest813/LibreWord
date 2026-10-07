@@ -1,6 +1,6 @@
 import { h, debounce, escapeHtml } from './dom.js';
 import { icon } from './icons.js';
-import { searchKey } from '../editor/search.js';
+import { searchKey, buildRegExp } from '../editor/search.js';
 import { collectHeadings } from '../editor/toc.js';
 import { TextSelection } from '@tiptap/pm/state';
 import { PX_PER_IN, PX_PER_CM, usesInches } from '../editor/page-setup.js';
@@ -128,7 +128,8 @@ export class FindPanel {
       return;
     }
     const n = s.results.length;
-    this.count.textContent = n ? `${s.current + 1} of ${n}` : 'No results';
+    const invalid = !n && s.options?.regex && !buildRegExp(s.term, s.options);
+    this.count.textContent = n ? `${s.current + 1} of ${n}` : invalid ? 'Invalid pattern' : 'No results';
     this.count.classList.toggle('no-results', !n);
     this.app.nav?.renderResults(s);
   }
@@ -143,8 +144,33 @@ export class FindPanel {
       ed.chain().setTextSelection({ from: cur.from, to: cur.to }).scrollIntoView().run();
       return;
     }
+    // Like Word, stop once replacing wraps back around to where it started,
+    // instead of going on to replace inside text it already replaced
+    // ("cat" → "cats" would otherwise give "catss").
+    const run = this.replaceRun;
+    if (!run || run.doc !== ed.state.doc || run.term !== s.term) this.replaceRun = { origin: cur.from, wrapped: false, count: 0 };
+    const r = this.replaceRun;
+    const before = ed.state.doc.content.size;
     ed.commands.replaceCurrent(this.replaceInput.value);
+    const delta = ed.state.doc.content.size - before;
+    const end = cur.to + delta;
+    if (r.wrapped && cur.from < r.origin) r.origin += delta;
+    r.count++;
+    const results = searchKey.getState(ed.state).results;
+    let next = results.find((m) => m.from >= end);
+    if (!next) {
+      r.wrapped = true;
+      next = results[0];
+    }
+    if (!next || (r.wrapped && next.from >= r.origin)) {
+      ed.chain().setTextSelection(end).scrollIntoView().run();
+      this.app.toast(`Done. Replaced ${r.count} occurrence${r.count === 1 ? '' : 's'}.`);
+      this.replaceRun = null;
+      return;
+    }
     ed.commands.findNext();
+    r.doc = ed.state.doc;
+    r.term = s.term;
   }
 
   replaceAll() {

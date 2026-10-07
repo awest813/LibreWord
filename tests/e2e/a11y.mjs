@@ -38,6 +38,21 @@ for (const tab of ['insert', 'layout', 'review', 'view']) {
   await page.click(`.ribbon-tab[data-tab="${tab}"]`);
   await audit(`editor (${tab} tab)`);
 }
+// Ribbon popovers: menus, colour panels, the styles gallery and the table picker.
+for (const [tab, opener, label] of [
+  ['home', 'button[aria-label="Font color options"]', 'font colour panel'],
+  ['home', 'button[aria-label="Highlight options"]', 'highlight panel'],
+  ['home', '.style-more', 'styles gallery'],
+  ['insert', '[data-cmd="insert-table"]', 'table picker'],
+  ['layout', 'button:has-text("Margins")', 'margins menu'],
+  ['layout', 'button:has-text("Size")', 'page size menu'],
+]) {
+  await page.click(`.ribbon-tab[data-tab="${tab}"]`);
+  await page.click(opener);
+  await page.waitForSelector('.popover');
+  await audit(`popover: ${label}`);
+  await page.keyboard.press('Escape');
+}
 await page.keyboard.press('Control+h');
 await audit('find & replace');
 await page.keyboard.press('Escape');

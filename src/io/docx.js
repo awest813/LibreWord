@@ -465,7 +465,23 @@ function tocEntries(json, pages = []) {
  * @param tocPages page number of each heading in document order (from the
  *   live layout), used for the table of contents' cached entries.
  */
+// Characters XML 1.0 can't contain (control characters such as PowerPoint's
+// vertical-tab line break, lone surrogates). Written as-is they make Word
+// reject the whole file.
+const XML_ILLEGAL = /[\u0000-\u0008\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+const xmlSafe = (v) => {
+  if (typeof v === 'string') return v.replace(/[\u000B\u000C]/g, ' ').replace(XML_ILLEGAL, '');
+  if (Array.isArray(v)) return v.map(xmlSafe);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, xmlSafe(x)]));
+  return v;
+};
+
 export async function buildDocx(json, settings, { title = 'Document', author = 'LibreWord', comments = {}, tocPages = [] } = {}) {
+  json = xmlSafe(json);
+  settings = xmlSafe(settings);
+  comments = xmlSafe(comments);
+  title = xmlSafe(title);
+  author = xmlSafe(author);
   const geometry = pageGeometry(settings);
   const images = await collectImages(json);
   const commentData = buildComments(json, comments);

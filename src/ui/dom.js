@@ -42,13 +42,33 @@ export const shortcutLabel = (s) => {
 
 let openPopover = null;
 
+/**
+ * Where keyboard focus goes when the element holding it disappears (a menu
+ * item that was clicked, a dialog opened from one): the editor screen points
+ * this at the document so typing carries on there, as in Word.
+ */
+let focusFallback = null;
+export const setFocusFallback = (fn) => { focusFallback = fn; };
+const focusIsLost = () => !document.activeElement || document.activeElement === document.body;
+/** Give focus to the fallback once the current task settles, unless something else took it. */
+export function restoreLostFocus() {
+  setTimeout(() => {
+    if (focusIsLost() && !openPopover && !document.querySelector('dialog[open]')) focusFallback?.();
+  });
+}
+
+/** The button that reports the popover as expanded: the anchor, or the caret of a split button. */
+const expanderOf = (anchor) => (anchor?.matches?.('button, [role]') ? anchor : anchor?.querySelector?.('[aria-haspopup]') || null);
+
 export function closePopover() {
   if (!openPopover) return;
   const { el, anchor, onClose, cleanup } = openPopover;
   openPopover = null;
   cleanup();
+  const hadFocus = el.contains(document.activeElement);
   el.remove();
-  anchor?.setAttribute('aria-expanded', 'false');
+  if (hadFocus) restoreLostFocus();
+  expanderOf(anchor)?.setAttribute('aria-expanded', 'false');
   anchor?.classList.remove('is-open');
   onClose?.();
 }
@@ -59,12 +79,15 @@ export const isPopoverOpen = () => Boolean(openPopover);
  * Show `content` in a floating panel anchored below `anchor` (or at {x, y}).
  * Clicking outside or pressing Escape closes it.
  */
-export function showPopover(anchor, content, { at = null, onClose = null, className = '', focus = true, placement = 'bottom-start' } = {}) {
+export function showPopover(anchor, content, { at = null, onClose = null, className = '', focus = true, placement = 'bottom-start', label = null } = {}) {
   const sameAnchor = openPopover && anchor && openPopover.anchor === anchor;
   closePopover();
   if (sameAnchor) return null; // clicking the trigger again toggles it shut
 
-  const el = h('div', { class: `popover ${className}`, role: 'dialog' });
+  // A menu is its own widget; anything else is a small dialog named after its button.
+  const isMenu = content.getAttribute?.('role') === 'menu';
+  const name = label || anchor?.getAttribute?.('aria-label') || anchor?.getAttribute?.('title') || anchor?.textContent?.trim() || 'Options';
+  const el = h('div', { class: `popover ${className}`, role: isMenu ? null : 'dialog', 'aria-label': isMenu ? null : name });
   el.append(content);
   document.body.append(el);
 
@@ -100,7 +123,9 @@ export function showPopover(anchor, content, { at = null, onClose = null, classN
       a?.focus?.();
     } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       const items = $$('[role="menuitem"]:not([disabled]),[role="menuitemcheckbox"]:not([disabled])', el);
-      if (!items.length) return;
+      // Other controls (the table size grid) handle their own arrow keys.
+      const active = document.activeElement;
+      if (!items.length || (el.contains(active) && active !== el && !items.includes(active))) return;
       e.preventDefault();
       const i = items.indexOf(document.activeElement);
       const next = e.key === 'ArrowDown' ? (i + 1) % items.length : (i - 1 + items.length) % items.length;
@@ -124,7 +149,7 @@ export function showPopover(anchor, content, { at = null, onClose = null, classN
       window.removeEventListener('blur', onResize);
     },
   };
-  anchor?.setAttribute('aria-expanded', 'true');
+  expanderOf(anchor)?.setAttribute('aria-expanded', 'true');
   anchor?.classList.add('is-open');
   if (focus) {
     const first = el.querySelector('[role="menuitem"],[role="menuitemcheckbox"],input,button');

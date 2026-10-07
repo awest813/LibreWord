@@ -378,6 +378,8 @@ await test('comments: add, reply, resolve, persist and export', async () => {
   await page.fill('.comment-reply-input', 'Yes, keep it.');
   await page.press('.comment-reply-input', 'Enter');
   await page.waitForSelector('.comment-reply');
+  // The box empties, so a second Enter can't post the reply twice.
+  assert.equal(await page.inputValue('.comment-reply-input'), '');
   assert.match(await page.evaluate(() => window.libreword.editor.getHTML()), /<span data-comment-id="[^"]+" class="lw-comment">review<\/span>/);
   await page.keyboard.press('Control+s');
   await sleep(300);
@@ -397,6 +399,12 @@ await test('comments: add, reply, resolve, persist and export', async () => {
   assert.match(xml, /Yes, keep it\./);
   await page.click('.comment-card button[aria-label="Delete comment"]');
   assert.doesNotMatch(await page.evaluate(() => window.libreword.editor.getHTML()), /data-comment-id/);
+  // Undo brings back the whole comment, not just its highlight.
+  await page.evaluate(() => window.libreword.editor.commands.undo());
+  await page.waitForSelector('.comment-card');
+  assert.match(await page.textContent('.comment-card'), /Yes, keep it\./);
+  await page.evaluate(() => window.libreword.editor.commands.redo());
+  await page.waitForSelector('.comment-card', { state: 'hidden' });
 });
 
 await test('review regressions: drafts, clear formatting, go to page', async () => {
@@ -583,6 +591,86 @@ await test('Ctrl+S in the File backstage saves instead of reaching the browser',
   });
   assert.equal(prevented, true);
   await page.waitForSelector('.backstage', { state: 'detached' });
+});
+
+await test('table shading colours the cell and exports it', async () => {
+  await page.evaluate(() => {
+    const ed = window.libreword.editor;
+    ed.commands.setContent('<p>x</p>');
+    ed.chain().focus().insertTable({ rows: 2, cols: 2, withHeaderRow: false }).run();
+  });
+  await settle();
+  await page.click('.ribbon-tab[data-tab="table"]');
+  await page.click('button:has-text("Shading")');
+  await page.click('.popover .color-chip >> nth=5');
+  const bg = await page.evaluate(() => getComputedStyle(window.libreword.screen.editorEl.querySelector('td')).backgroundColor);
+  assert.notEqual(bg, 'rgba(0, 0, 0, 0)');
+  assert.match(await page.evaluate(() => window.libreword.editor.getHTML()), /<td[^>]*style="background-color: /);
+  assert.equal(await page.evaluate(() => window.libreword.screen.editorEl.contains(document.activeElement)), true);
+});
+
+await test('menus and dialogs give focus back to the document', async () => {
+  await page.evaluate(() => window.libreword.editor.commands.setContent('<p>focus</p>'));
+  await page.click('.ribbon-tab[data-tab="layout"]');
+  await page.click('button:has-text("Margins")');
+  await page.click('.popover .margin-option >> nth=1');
+  await sleep(50);
+  assert.equal(await page.evaluate(() => window.libreword.screen.editorEl.contains(document.activeElement)), true);
+  await page.click('button:has-text("Size")');
+  await page.click('.popover .menu-item:has-text("Page Setup")');
+  await page.waitForSelector('dialog[open]');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('dialog[open]', { state: 'detached' });
+  await sleep(50);
+  assert.equal(await page.evaluate(() => window.libreword.screen.editorEl.contains(document.activeElement)), true);
+});
+
+await test('keyboard: Ctrl+Alt+0 sets Normal text, F6 reaches the ribbon and back', async () => {
+  await page.evaluate(() => {
+    const ed = window.libreword.editor;
+    ed.commands.setContent('<h2>Head</h2><p>body</p>');
+    ed.commands.focus(3);
+  });
+  await page.keyboard.press('Control+Alt+0');
+  assert.match(await page.evaluate(() => window.libreword.editor.getHTML()), /^<p>Head<\/p>/);
+  await page.keyboard.press('F6');
+  assert.equal(await page.evaluate(() => document.activeElement.getAttribute('role')), 'tab');
+  await page.keyboard.press('F6');
+  assert.equal(await page.evaluate(() => window.libreword.screen.editorEl.contains(document.activeElement)), true);
+});
+
+await test('find & replace: one-by-one stops after a full pass; bad patterns say so', async () => {
+  await page.evaluate(() => {
+    const ed = window.libreword.editor;
+    ed.commands.setContent('<p>cat cat dog cat</p><p>the cat sat</p>');
+    ed.commands.setTextSelection(14); // inside "dog": start mid-document
+  });
+  await page.keyboard.press('Control+h');
+  await page.fill('.find-panel input >> nth=0', 'cat');
+  await page.fill('.find-panel input >> nth=1', 'cats');
+  await sleep(200);
+  // Selects the first match, then replaces one per click until it says it's done.
+  for (let i = 0; i < 12 && !(await page.isVisible('.toast:has-text("Done. Replaced 4")')); i++) {
+    await page.click('.find-panel button:has-text("Replace")');
+  }
+  await page.waitForSelector('.toast:has-text("Done. Replaced 4")');
+  assert.equal(await page.evaluate(() => window.libreword.editor.getText({ blockSeparator: '|' })), 'cats cats dog cats|the cats sat');
+  await page.click('.find-panel button[aria-label="Use regular expression"]');
+  await page.fill('.find-panel input >> nth=0', '(');
+  await page.waitForSelector('.find-count:has-text("Invalid pattern")');
+  await page.click('.find-panel button[aria-label="Use regular expression"]');
+  await page.keyboard.press('Escape');
+});
+
+await test('find & replace fits a phone screen', async () => {
+  await page.setViewportSize({ width: 375, height: 740 });
+  await page.keyboard.press('Control+h');
+  await page.waitForSelector('.find-panel:not([hidden])');
+  const outside = await page.evaluate(() => [...document.querySelectorAll('.find-panel button, .find-panel input')]
+    .filter((b) => b.offsetParent && b.getBoundingClientRect().right > innerWidth).map((b) => b.getAttribute('aria-label') || b.textContent));
+  assert.deepEqual(outside, []);
+  await page.click('.find-panel button[aria-label="Close (Esc)"]');
+  await page.setViewportSize({ width: 1400, height: 950 });
 });
 
 await test('no runtime errors', async () => {

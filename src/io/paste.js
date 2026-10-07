@@ -45,7 +45,9 @@ export function cleanWordHtml(html) {
     if (!first.isConnected || first.parentNode.closest?.('li')) continue;
     const run = [first];
     let next = first.nextElementSibling;
-    while (next && next.dataset?.listLevel) {
+    // A top-level change between bullets and numbering starts a separate list.
+    const base = Number(first.dataset.listLevel);
+    while (next && next.dataset?.listLevel && !(Number(next.dataset.listLevel) <= base && next.dataset.listType !== first.dataset.listType)) {
       run.push(next);
       next = next.nextElementSibling;
     }
@@ -62,6 +64,12 @@ export function cleanWordHtml(html) {
         parentLi.append(nested);
         stack.push({ level, list: nested });
         top = stack[stack.length - 1];
+      }
+      if (level === top.level && stack.length > 1 && top.list.tagName.toLowerCase() !== p.dataset.listType) {
+        // Same nesting level, other kind of list: a sibling list in the same item.
+        const sibling = doc.createElement(p.dataset.listType);
+        top.list.after(sibling);
+        top.list = sibling;
       }
       const li = doc.createElement('li');
       delete p.dataset.listLevel;

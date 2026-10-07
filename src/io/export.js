@@ -37,6 +37,8 @@ export function standaloneHtml(editor, title, settings) {
 ${documentCss}
 body { margin: 0; background: #fff; color: #000; }
 .lw-document { max-width: ${g.contentWidth}px; margin: 0 auto; padding: 48px 24px; }
+/* Tabs and runs of spaces are content, as in the editor. */
+.lw-document :is(p, h1, h2, h3, h4, h5, h6, li, td, th) { white-space: pre-wrap; }
 .page-break { break-after: page; height: 0; border: 0; }
 @media screen { .page-break { border-top: 1px dashed #bbb; margin: 24px 0; } }
 @page { size: ${g.width}px ${g.height}px; margin: ${g.margins.top}px ${g.margins.right}px ${g.margins.bottom}px ${g.margins.left}px; }

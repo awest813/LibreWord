@@ -295,7 +295,7 @@ button { cursor: pointer; }
 .font-menu .menu-label { font-size: 15px; }
 
 .color-panel { padding: 8px; width: 236px; }
-.color-panel h4 { margin: 2px 0 6px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.color-panel .color-heading { margin: 2px 0 6px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
 .color-grid { display: grid; grid-template-columns: repeat(10, 18px); gap: 4px; margin-bottom: 8px; }
 .color-grid.cols-5 { grid-template-columns: repeat(5, 36px); }
 .color-chip { width: 18px; height: 18px; border-radius: 2px; border: 1px solid rgba(0, 0, 0, 0.15); padding: 0; }
@@ -634,7 +634,7 @@ kbd { font: 12px var(--font-ui); background: var(--surface-2); border: 1px solid
   .backstage-main { padding: 20px; }
 }
 @media (max-width: 600px) {
-  .file-chip-state, .save-state, .statusbar .sb-optional, .zoom-slider, .statusbar .icon-btn[aria-label='Focus'], .statusbar .icon-btn[aria-label^='Zoom'] { display: none; }
+  .file-chip-state, .save-state, .statusbar .sb-optional, .zoom-slider, .statusbar .icon-btn[aria-label='Focus mode'], .statusbar .icon-btn[aria-label^='Zoom'] { display: none; }
   .ribbon { min-height: 0; }
   .titlebar > .icon-btn[aria-label^='Save'] { display: none; }
   .canvas-inner { padding: 0 8px 32px; }
@@ -646,6 +646,10 @@ kbd { font: 12px var(--font-ui); background: var(--surface-2); border: 1px solid
   .canvas .ruler { display: none; }
   .canvas .canvas-inner { padding-top: 12px; }
   .doc-table .col-date { display: none; }
+  /* Find & Replace: the box gets the full width, its buttons wrap to a second line. */
+  .find-panel { left: 8px; right: 8px; width: auto; max-width: none; }
+  .find-row { flex-wrap: wrap; justify-content: flex-end; }
+  .find-row > .find-input { flex: 1 1 calc(100% - 40px); }
 }
 
 /* ------------------------------------------------------------------ print */

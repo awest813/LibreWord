@@ -139,7 +139,7 @@ export class Ribbon {
   split({ main, content, title }) {
     const caret = h('button', { type: 'button', class: 'rb', title: `${title} options`, 'aria-label': `${title} options`, 'aria-haspopup': 'true', html: icon('chevronDown', 'icon rb-caret') });
     caret.addEventListener('mousedown', (e) => e.preventDefault());
-    caret.addEventListener('click', () => showPopover(caret.parentElement, content(), {}));
+    caret.addEventListener('click', () => showPopover(caret.parentElement, content(), { label: title }));
     return h('div', { class: `rb-split${main.classList.contains('rb-large') ? ' is-large' : ''}` }, main, caret);
   }
 
@@ -256,10 +256,10 @@ export class Ribbon {
       const chip = (c) => h('button', { type: 'button', class: 'color-chip', style: { background: c }, title: c, 'aria-label': c, onclick: () => { closePopover(); applyColor(c); } });
       if (isText) {
         p.append(
-          h('button', { type: 'button', class: 'menu-item', role: 'menuitem', onclick: () => { closePopover(); this.editor.chain().focus().unsetColor().run(); } }, h('span', { class: 'menu-icon', html: '<span style="display:inline-block;width:14px;height:14px;background:currentColor;border-radius:2px"></span>' }), h('span', {}, 'Automatic'), h('span')),
-          h('h4', {}, 'Theme colors'),
+          h('button', { type: 'button', class: 'menu-item', onclick: () => { closePopover(); this.editor.chain().focus().unsetColor().run(); } }, h('span', { class: 'menu-icon', html: '<span style="display:inline-block;width:14px;height:14px;background:currentColor;border-radius:2px"></span>' }), h('span', {}, 'Automatic'), h('span')),
+          h('div', { class: 'color-heading' }, 'Theme colors'),
           h('div', { class: 'color-grid' }, ...THEME_COLORS.flat().map(chip)),
-          h('h4', {}, 'Standard colors'),
+          h('div', { class: 'color-heading' }, 'Standard colors'),
           h('div', { class: 'color-grid' }, ...STANDARD_COLORS.map(chip)),
         );
         const custom = h('input', { type: 'color', value: last, 'aria-label': 'Custom color' });
@@ -268,7 +268,7 @@ export class Ribbon {
       } else {
         p.append(
           h('div', { class: 'color-grid cols-5' }, ...HIGHLIGHTS.map(chip)),
-          h('button', { type: 'button', class: 'menu-item', role: 'menuitem', onclick: () => { closePopover(); this.editor.chain().focus().unsetHighlight().run(); } }, h('span', { class: 'menu-icon', html: icon('eraser') }), h('span', {}, 'No color'), h('span')),
+          h('button', { type: 'button', class: 'menu-item', onclick: () => { closePopover(); this.editor.chain().focus().unsetHighlight().run(); } }, h('span', { class: 'menu-icon', html: icon('eraser') }), h('span', {}, 'No color'), h('span')),
         );
       }
       return p;
@@ -278,10 +278,11 @@ export class Ribbon {
 
   styleGallery() {
     const gallery = h('div', { class: 'style-gallery-items', role: 'listbox', 'aria-label': 'Styles' });
-    const card = (s) => {
+    // Options in the listbox; plain buttons in the "More styles" panel.
+    const card = (s, inList = true) => {
       const c = h(
         'button',
-        { type: 'button', class: 'style-card', role: 'option', title: s.name, 'data-style': s.id },
+        { type: 'button', class: 'style-card', role: inList ? 'option' : null, title: s.name, 'aria-label': s.name, 'data-style': s.id },
         h('span', { class: 'sample', style: s.css }, s.sample),
         h('span', { class: 'name' }, s.name),
       );
@@ -292,13 +293,15 @@ export class Ribbon {
       });
       return c;
     };
-    const visible = STYLES.slice(0, 5).map(card);
+    const visible = STYLES.slice(0, 5).map((st) => card(st));
     const more = h('button', { type: 'button', class: 'style-more', title: 'More styles', 'aria-label': 'More styles', html: icon('chevronDown') });
     more.addEventListener('mousedown', (e) => e.preventDefault());
     more.addEventListener('click', () => {
-      const panel = h('div', { class: 'gallery-panel' }, ...STYLES.map(card));
+      const panel = h('div', { class: 'gallery-panel' }, ...STYLES.map((st) => card(st, false)));
       const id = activeStyleId(this.editor);
-      panel.querySelector(`[data-style="${id}"]`)?.classList.add('is-active');
+      const current = panel.querySelector(`[data-style="${id}"]`);
+      current?.classList.add('is-active');
+      current?.setAttribute('aria-current', 'true');
       showPopover(more, panel, { placement: 'bottom-end' });
     });
     // The listbox holds only style options; "More styles" sits beside it.
@@ -318,11 +321,12 @@ export class Ribbon {
   tablePicker() {
     const wrap = h('div', { class: 'table-grid-picker' });
     const label = h('p', { class: 'table-grid-label' }, 'Insert Table');
-    const grid = h('div', { class: 'table-grid', role: 'grid' });
+    // One Tab stop; arrow keys move between sizes.
+    const grid = h('div', { class: 'table-grid', role: 'group', 'aria-label': 'Table size' });
     const cells = [];
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 10; c++) {
-        const b = h('button', { type: 'button', 'aria-label': `${c + 1} by ${r + 1} table` });
+        const b = h('button', { type: 'button', 'aria-label': `${c + 1} by ${r + 1} table`, tabindex: r || c ? '-1' : '0' });
         b.addEventListener('mouseenter', () => highlight(r, c));
         b.addEventListener('focus', () => highlight(r, c));
         b.addEventListener('click', () => {
@@ -333,6 +337,17 @@ export class Ribbon {
         grid.append(b);
       }
     }
+    grid.addEventListener('keydown', (e) => {
+      const i = cells.findIndex(([, , b]) => b === document.activeElement);
+      if (i < 0) return;
+      const [r, c] = cells[i];
+      const move = { ArrowRight: [0, 1], ArrowLeft: [0, -1], ArrowDown: [1, 0], ArrowUp: [-1, 0] }[e.key];
+      if (!move) return;
+      e.preventDefault();
+      const nr = Math.min(7, Math.max(0, r + move[0]));
+      const nc = Math.min(9, Math.max(0, c + move[1]));
+      cells[nr * 10 + nc][2].focus();
+    });
     const highlight = (r, c) => {
       for (const [rr, cc, b] of cells) b.classList.toggle('is-on', rr <= r && cc <= c);
       label.textContent = `${c + 1}×${r + 1} Table`;
@@ -515,7 +530,7 @@ export class Ribbon {
           label: 'Margins',
           large: true,
           content: () => {
-            const wrap = h('div', { class: 'menu' });
+            const wrap = h('div', { class: 'menu', role: 'menu', 'aria-label': 'Margins' });
             const m = a.settings.margins;
             for (const [key, p] of Object.entries(MARGIN_PRESETS)) {
               const pm = p.margins;

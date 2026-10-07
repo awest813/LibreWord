@@ -1,4 +1,4 @@
-import { h } from './dom.js';
+import { h, restoreLostFocus } from './dom.js';
 import { icon } from './icons.js';
 
 /**
@@ -59,6 +59,8 @@ export function openDialog({ title, body, buttons = [{ label: 'Close', value: nu
     });
     dlg.addEventListener('close', () => {
       dlg.remove();
+      // The element that opened the dialog may be gone (a menu item); don't leave focus on <body>.
+      restoreLostFocus();
       resolve(result);
     });
     dlg.addEventListener('click', (e) => {

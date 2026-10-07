@@ -630,8 +630,9 @@ function buildList(items, numbering, counters) {
     const { ilvl: level, numId } = it.list;
     while (stack.length && stack[stack.length - 1].level > level) html += `</li></${stack.pop().tag}>`;
     let top = stack[stack.length - 1];
-    // A different list at the top level starts a new list.
-    if (top && stack.length === 1 && top.level === level && top.numId !== numId) {
+    // A different list at the same level starts a new list (nested ones open
+    // inside the same parent item, e.g. numbered steps followed by bullets).
+    if (top && top.level === level && top.numId !== numId) {
       html += `</li></${stack.pop().tag}>`;
       top = null;
     }
@@ -812,6 +813,9 @@ export async function readDocx(arrayBuffer) {
     endnotes: readNotes(await readText(zip, 'word/endnotes.xml'), 'endnote'),
   };
   const doc = parseXml(docXml);
+  // A malformed document.xml parses to an error page, not an exception; fail so
+  // the caller can fall back to another reader instead of opening an empty document.
+  if (doc.getElementsByTagName('parsererror').length) throw new Error('The document part of this file is damaged.');
   const body = deep(doc, 'body')[0];
   const reader = new DocxReader({
     styleSheet: readStyles(stylesXml),

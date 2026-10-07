@@ -3,7 +3,13 @@
 const escapeText = (s) => s
   .replace(/([\\`*_~[\]#<>|])/g, '\\$1')
   .replace(/&(?=#?\w+;)/g, '\\&') // "&lt;" typed as text must not turn into "<"
-  .replace(/^(\s*)([-+]|\d+\.)(\s)/, '$1\\$2$3');
+  // Text that would start a list, rule or setext heading: "3. Results", "1) first", "-", "---".
+  .replace(/^(\s*)(\d+)([.)])(?=\s|$)/, '$1$2\\$3')
+  .replace(/^(\s*)([-+])(?=\s|$|-+\s*$)/, '$1\\$2')
+  .replace(/^(\s*)=(?==*\s*$)/, '$1\\=');
+
+/** Link and image destinations with spaces or brackets go in <…>. */
+const destination = (url = '') => (/[\s()<>]/.test(url) ? `<${url.replace(/[<>]/g, encodeURIComponent)}>` : url);
 
 /** A backtick fence longer than any run of backticks inside `text`. */
 const fenceFor = (text, min = 1) => '`'.repeat(Math.max(min, ...(text.match(/`+/g) || []).map((r) => r.length + 1)));
@@ -23,7 +29,7 @@ function inline(nodes = []) {
       continue;
     }
     if (n.type === 'image') {
-      out += `![${n.attrs?.alt || ''}](${n.attrs?.src || ''})`;
+      out += `![${(n.attrs?.alt || '').replace(/([\\[\]])/g, '\\$1')}](${destination(n.attrs?.src || '')})`;
       continue;
     }
     if (n.type !== 'text') continue;
@@ -42,12 +48,12 @@ function inline(nodes = []) {
         if (has('underline')) c = `<u>${c}</u>`;
         if (has('subscript')) c = `<sub>${c}</sub>`;
         if (has('superscript')) c = `<sup>${c}</sup>`;
-        if (has('highlight')) c = `==${c}==`;
+        if (has('highlight')) c = `<mark>${c}</mark>`;
       }
       t = lead + c + trail;
     }
     const link = marks.find((m) => m.type === 'link');
-    if (link) t = `[${t}](${link.attrs.href})`;
+    if (link) t = `[${t}](${destination(link.attrs.href)})`;
     out += t;
   }
   return out;
@@ -57,7 +63,12 @@ const textOf = (node) => (node.content || []).map((c) => (c.type === 'text' ? c.
 
 function table(node) {
   const rows = (node.content || []).map((row) =>
-    (row.content || []).map((cell) => (cell.content || []).map((p) => inline(p.content)).join(' ').replace(/\n/g, ' ')),
+    (row.content || []).map((cell) => (cell.content || [])
+      // A cell is one line: line breaks and nested blocks (lists) become <br>,
+      // and every "|" is escaped, even inside code spans, or it would split the cell.
+      .map((child) => (child.type === 'paragraph' ? inline(child.content).replace(/ {2}\n/g, '<br>') : block(child, {}).replace(/\n/g, '<br>')))
+      .join('<br>')
+      .replace(/(?<!\\)\|/g, '\\|')),
   );
   if (!rows.length) return '';
   const width = Math.max(...rows.map((r) => r.length));
@@ -84,11 +95,11 @@ function block(node, ctx) {
     case 'horizontalRule':
       return '---';
     case 'pageBreak':
-      return '<div style="page-break-after: always"></div>';
+      return '<div data-page-break style="page-break-after: always"></div>';
     case 'bulletList':
     case 'orderedList':
     case 'taskList': {
-      let n = node.attrs?.start || 1;
+      let n = node.attrs?.start ?? 1;
       return (node.content || [])
         .map((item) => {
           let marker = '-';

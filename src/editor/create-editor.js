@@ -3,7 +3,7 @@ import StarterKit from '@tiptap/starter-kit';
 import { TextStyleKit } from '@tiptap/extension-text-style';
 import TextAlign from '@tiptap/extension-text-align';
 import Highlight from '@tiptap/extension-highlight';
-import { TableKit } from '@tiptap/extension-table';
+import { TableKit, TableCell, TableHeader } from '@tiptap/extension-table';
 import Image from '@tiptap/extension-image';
 import Subscript from '@tiptap/extension-subscript';
 import Superscript from '@tiptap/extension-superscript';
@@ -18,6 +18,17 @@ import { Search } from './search.js';
 import { TableOfContents } from './toc.js';
 import { WordCommands } from './word-commands.js';
 import { CommentMark } from './comments.js';
+
+// Cell shading (Table > Shading, and Word's w:shd on import/export).
+const shading = {
+  backgroundColor: {
+    default: null,
+    parseHTML: (el) => el.style.backgroundColor || null,
+    renderHTML: (attrs) => (attrs.backgroundColor ? { style: `background-color: ${attrs.backgroundColor}` } : {}),
+  },
+};
+const ShadedCell = TableCell.extend({ addAttributes() { return { ...this.parent?.(), ...shading }; } });
+const ShadedHeader = TableHeader.extend({ addAttributes() { return { ...this.parent?.(), ...shading }; } });
 
 /**
  * The extension list is shared by the live editor and by tests, so the
@@ -34,7 +45,9 @@ export function buildExtensions({ getGeometry = () => null, onLayout = () => {},
     TextStyleKit.configure({ lineHeight: false, backgroundColor: false }),
     TextAlign.configure({ types: ['heading', 'paragraph'], alignments: ['left', 'center', 'right', 'justify'] }),
     Highlight.configure({ multicolor: true }),
-    TableKit.configure({ table: { resizable: true, cellMinWidth: 36, allowTableNodeSelection: true } }),
+    TableKit.configure({ table: { resizable: true, cellMinWidth: 36, allowTableNodeSelection: true }, tableCell: false, tableHeader: false }),
+    ShadedCell,
+    ShadedHeader,
     Image.configure({
       inline: true,
       allowBase64: true,
