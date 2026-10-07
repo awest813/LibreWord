@@ -173,7 +173,8 @@ export function computeLayout(view, geometry, oldSpacers, { dirty = null, prevPa
     const height = rect.height / scale - (oldBefore(end - 1) - oldBefore(pos));
 
     if (node.type.name === 'pageBreak') {
-      breakAfterPage = pageOf(top);
+      // Each further break in a row adds a blank page, as in Word (and the .docx export).
+      breakAfterPage = breakAfterPage >= 0 ? breakAfterPage + 1 : pageOf(top);
       return;
     }
 

@@ -94,7 +94,9 @@
 .lw-document ul[data-type='taskList'] li > div { flex: 1 1 auto; min-width: 0; }
 .lw-document ul[data-type='taskList'] li[data-checked='true'] > div { text-decoration: line-through; color: #7f7f7f; }
 
-.lw-document img { max-width: 100%; height: auto; vertical-align: bottom; }
+/* As in Word, a picture never runs off the page: wider ones fit the text
+   width, taller ones the page's text height (print layout sets the variable). */
+.lw-document img { max-width: 100%; max-height: var(--lw-content-height, none); object-fit: contain; height: auto; vertical-align: bottom; }
 
 .lw-document table { border-collapse: collapse; table-layout: fixed; width: 100%; margin-bottom: 8pt; }
 .lw-document .tableWrapper { margin-bottom: 8pt; overflow-x: auto; }

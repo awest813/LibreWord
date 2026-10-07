@@ -72,7 +72,7 @@ export function buildExtensions({ getGeometry = () => null, onLayout = () => {},
   ];
 }
 
-export function createEditor({ element, content, getGeometry, onLayout, getPageOf, isKnownComment, onUpdate, onSelectionUpdate, onTransaction, editorProps = {} }) {
+export function createEditor({ element, content, getGeometry, onLayout, getPageOf, isKnownComment, onUpdate, onSelectionUpdate, onTransaction, onContentError, editorProps = {} }) {
   let editor;
   editor = new Editor({
     element,
@@ -87,6 +87,11 @@ export function createEditor({ element, content, getGeometry, onLayout, getPageO
       },
     }),
     autofocus: 'start',
+    // Stored documents (JSON) must fit the schema exactly; a node this build
+    // doesn't know would otherwise be dropped silently, then saved over.
+    // Imported HTML is parsed leniently as usual.
+    enableContentCheck: Boolean(onContentError) && typeof content === 'object',
+    onContentError: onContentError || (() => {}),
     editorProps: {
       attributes: {
         class: 'lw-document',
@@ -101,5 +106,8 @@ export function createEditor({ element, content, getGeometry, onLayout, getPageO
     onSelectionUpdate,
     onTransaction,
   });
+  // Only the initial content is checked; later setContent calls (pasted or
+  // imported HTML, restored versions) parse leniently.
+  editor.setOptions({ enableContentCheck: false });
   return editor;
 }

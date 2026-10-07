@@ -19,7 +19,7 @@ const go = (hash) => {
 
 async function newFromTemplate(t) {
   const id = await createDoc({ title: t.title, html: t.html(), settings: t.settings || {} });
-  go(`#/doc/${id}`);
+  go(`#/doc/${encodeURIComponent(id)}`);
 }
 
 /**
@@ -30,7 +30,7 @@ async function newFromTemplate(t) {
  */
 async function importAndOpen(file, handle = null, { show = true } = {}) {
   const open = (id) => {
-    if (show) go(`#/doc/${id}`);
+    if (show) go(`#/doc/${encodeURIComponent(id)}`);
     return id;
   };
   try {
@@ -80,7 +80,7 @@ async function showStart() {
   // Warm the editor chunk while the user browses, so opening a document is instant.
   (window.requestIdleCallback || ((fn) => setTimeout(fn, 1500)))(prefetchEditor);
   renderStartScreen(root, {
-    onOpen: (id) => go(`#/doc/${id}`),
+    onOpen: (id) => go(`#/doc/${encodeURIComponent(id)}`),
     onTemplate: newFromTemplate,
     onImport: openFromDevice,
     onToggleTheme: toggleTheme,
@@ -98,7 +98,7 @@ async function showEditor(id) {
         const stale = screen;
         screen = null;
         stale.destroy({ save: false }).then(route);
-      } else go(`#/doc/${docId}`);
+      } else go(`#/doc/${encodeURIComponent(docId)}`);
     },
     onNewDoc: newFromTemplate,
     onImport: importAndOpen,
@@ -117,7 +117,12 @@ async function showEditor(id) {
 function route() {
   routing = routing.then(async () => {
     const m = /^#\/doc\/(.+)$/.exec(location.hash);
-    const id = m ? decodeURIComponent(m[1]) : null;
+    let id = null;
+    try {
+      id = m ? decodeURIComponent(m[1]) : null;
+    } catch {
+      id = ''; // malformed: not a document we have
+    }
     if (screen && screen.docId === id) return;
     // Back button, links, launch handlers…: offer to save to the linked file first.
     if (screen && !(await screen.confirmLeave())) {
@@ -129,6 +134,10 @@ function route() {
       screen = null;
     }
     root.removeAttribute('aria-busy');
+    if (m && !id) {
+      history.replaceState(null, '', '#/');
+      toast('That document link isn’t valid.', { type: 'error' });
+    }
     if (id) await showEditor(id);
     else await showStart();
   }).catch((err) => {
@@ -173,14 +182,25 @@ window.addEventListener('dragleave', () => {
     overlay = null;
   }
 });
+// In the editor, the document handles drops on itself; a file dropped anywhere
+// else (the grey canvas, the ribbon) would make the browser navigate away to it.
+const outsideDocument = (e) => screen && !screen.editorEl?.contains(e.target) && e.dataTransfer?.types?.includes('Files');
 window.addEventListener('dragover', (e) => {
-  if (!screen) e.preventDefault();
+  if (!screen || outsideDocument(e)) e.preventDefault();
 });
 window.addEventListener('drop', (e) => {
   dragDepth = 0;
   overlay?.remove();
   overlay = null;
-  if (screen) return;
+  if (screen) {
+    if (!outsideDocument(e)) return;
+    e.preventDefault();
+    // As if dropped at the cursor: pictures are inserted there, documents opened.
+    if (!screen.handleFiles(e.dataTransfer.files, screen.editor.state.selection.head, e.dataTransfer)) {
+      toast('LibreWord can open Word, Markdown, text, HTML and RTF files, and insert pictures.', { type: 'error' });
+    }
+    return;
+  }
   e.preventDefault();
   const file = e.dataTransfer?.files?.[0];
   // The handle must be requested synchronously, during the drop event.
@@ -235,7 +255,16 @@ initInstall({
 // never competes with the first paint.
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
   window.addEventListener('load', () => {
-    import('virtual:pwa-register').then(({ registerSW }) => registerSW({ immediate: true })).catch(() => {});
+    import('virtual:pwa-register').then(({ registerSW }) => {
+      const updateSW = registerSW({
+        immediate: true,
+        onNeedRefresh: () => toast('A new version of LibreWord is ready.', {
+          timeout: 60000, action: { label: 'Update', run: () => updateSW() },
+        }),
+        // The new version has taken over: save, then reload onto it.
+        onNeedReload: () => (screen ? screen.flush() : Promise.resolve()).catch(() => {}).finally(() => location.reload()),
+      });
+    }).catch(() => {});
   });
 }
 

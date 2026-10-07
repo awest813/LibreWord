@@ -593,6 +593,113 @@ await test('Ctrl+S in the File backstage saves instead of reaching the browser',
   await page.waitForSelector('.backstage', { state: 'detached' });
 });
 
+await test('reloading right after typing keeps the last edits', async () => {
+  await page.evaluate(() => window.libreword.editor.commands.setContent('<p>before</p>'));
+  await page.evaluate(() => window.libreword.screen.flush());
+  await page.evaluate(() => window.libreword.editor.commands.focus('end'));
+  await page.keyboard.type(' typed then reloaded');
+  await page.reload(); // well inside the autosave delay
+  await editorReady();
+  assert.equal(await page.evaluate(() => window.libreword.editor.getText()), 'before typed then reloaded');
+  await page.waitForFunction(() => window.libreword.screen.saveState === 'saved');
+  assert.equal(await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('lw:pending:')).length), 0);
+});
+
+await test('a document this build cannot fully read opens read-only and is never saved over', async () => {
+  const id = await page.evaluate(() => window.libreword.screen.docId);
+  await page.evaluate(async (id) => {
+    const db = await new Promise((res, rej) => { const r = indexedDB.open('libreword'); r.onsuccess = () => res(r.result); r.onerror = rej; });
+    const tx = db.transaction('content', 'readwrite');
+    const store = tx.objectStore('content');
+    const rec = await new Promise((res) => { const g = store.get(id); g.onsuccess = () => res(g.result); });
+    rec.json = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'keep me' }] }, { type: 'futureWidget' }] };
+    store.put(rec);
+    await new Promise((res) => { tx.oncomplete = res; });
+    db.close();
+  }, id);
+  await page.reload();
+  await editorReady();
+  await page.waitForSelector('.toast:has-text("read-only")');
+  assert.equal(await page.evaluate(() => window.libreword.editor.isEditable), false);
+  await page.evaluate(() => window.libreword.screen.saveNow());
+  await page.click('.app-logo');
+  await page.waitForSelector('.template-card');
+  const stored = await page.evaluate(async (id) => {
+    const db = await new Promise((res) => { const r = indexedDB.open('libreword'); r.onsuccess = () => res(r.result); });
+    const rec = await new Promise((res) => { const g = db.transaction('content').objectStore('content').get(id); g.onsuccess = () => res(g.result); });
+    db.close();
+    return rec.json.content.map((n) => n.type);
+  }, id);
+  assert.deepEqual(stored, ['paragraph', 'futureWidget']);
+  await page.click('.template-card >> nth=0');
+  await editorReady();
+});
+
+await test('layout: two page breaks make a blank page; tall pictures fit on a page', async () => {
+  await page.evaluate(() => window.libreword.editor.commands.setContent('<p>one</p><div data-page-break></div><div data-page-break></div><p>two</p>'));
+  await page.waitForFunction(() => window.libreword.screen.pageCount === 3);
+  const src = await page.evaluate(() => {
+    const c = document.createElement('canvas');
+    c.width = 108; c.height = 2400;
+    c.getContext('2d').fillRect(0, 0, 108, 2400);
+    return c.toDataURL('image/png');
+  });
+  await page.evaluate((src) => window.libreword.editor.commands.setContent(`<p><img src="${src}" width="540" height="12000"></p>`), src);
+  await settle();
+  assert.deepEqual(await layoutViolations(), []);
+  const fits = await page.evaluate(() => {
+    const s = window.libreword.screen;
+    const img = s.editorEl.querySelector('img');
+    return img.getBoundingClientRect().height / s.view.zoom <= s.geometry.contentHeight + 1;
+  });
+  assert.equal(fits, true);
+});
+
+await test('a picture dropped beside the page is inserted, not opened by the browser', async () => {
+  await page.evaluate(() => window.libreword.editor.commands.setContent('<p>drop</p>'));
+  const navigated = page.waitForEvent('framenavigated', { timeout: 1000 }).then(() => true, () => false);
+  await page.evaluate(async () => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 4;
+    const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], 'dot.png', { type: 'image/png' }));
+    const canvas = document.querySelector('.canvas');
+    for (const type of ['dragover', 'drop']) canvas.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  await page.waitForFunction(() => window.libreword.screen.editorEl.querySelector('img'));
+  assert.equal(await navigated, false);
+});
+
+await test('a malformed document link goes to the start screen', async () => {
+  const id = await page.evaluate(() => window.libreword.screen.docId);
+  await page.evaluate(() => { location.hash = '#/doc/%E0%A4%A'; });
+  await page.waitForSelector('.template-card');
+  await page.waitForSelector('.toast:has-text("isn’t valid")');
+  await page.goto(`${BASE}#/doc/${encodeURIComponent(id)}`);
+  await editorReady();
+});
+
+await test('renaming in another tab is kept by the tab editing the document', async () => {
+  const id = await page.evaluate(() => window.libreword.screen.docId);
+  const other = await context.newPage();
+  await other.goto(BASE);
+  await other.waitForSelector('.doc-row');
+  const title = await page.evaluate(() => window.libreword.screen.title);
+  await other.click(`button[aria-label="More actions for ${title}"]`);
+  await other.click('.popover .menu-item:has-text("Rename")');
+  await other.fill('dialog input', 'Renamed elsewhere');
+  await other.press('dialog input', 'Enter');
+  await page.waitForFunction(() => window.libreword.screen.title === 'Renamed elsewhere');
+  await page.evaluate(() => window.libreword.editor.commands.insertContent('x'));
+  await page.evaluate(() => window.libreword.screen.flush());
+  await other.reload();
+  await other.waitForSelector('.doc-row');
+  assert.match(await other.textContent('.doc-table'), /Renamed elsewhere/);
+  await other.close();
+  assert.equal(await page.evaluate(() => window.libreword.screen.docId), id);
+});
+
 await test('table shading colours the cell and exports it', async () => {
   await page.evaluate(() => {
     const ed = window.libreword.editor;

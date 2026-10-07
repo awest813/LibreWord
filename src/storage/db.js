@@ -9,6 +9,12 @@ import { openDB } from 'idb';
  */
 const DB_NAME = 'libreword';
 const DB_VERSION = 3;
+
+// Changes made here rather than by an open editor (renames from the document
+// list, restored backups) are announced to every open editor, in any tab, so
+// the editor doesn't write its stale copy back over them.
+const changes = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('libreword') : null;
+const announce = (msg) => changes?.postMessage({ tab: 'storage', ...msg });
 const MAX_VERSIONS = 40;
 
 export const DEFAULT_SETTINGS = Object.freeze({
@@ -197,7 +203,9 @@ export async function saveDoc(id, { title, json, html, settings, comments, file,
 }
 
 export async function renameDoc(id, title) {
-  return saveDoc(id, { title });
+  const stored = await saveDoc(id, { title });
+  if (stored) announce({ type: 'renamed', id, title });
+  return stored;
 }
 
 export async function deleteDoc(id) {
@@ -249,9 +257,11 @@ export async function importBackup(data) {
   const meta = tx.objectStore('meta');
   const content = tx.objectStore('content');
   const result = { added: 0, updated: 0, skipped: 0 };
+  const replaced = [];
   for (const doc of data.documents) {
-    const m = doc?.meta;
-    if (!m?.id || typeof m.title !== 'string') {
+    // Ids are strings everywhere else (routes, lookups); a hand-edited backup may have numbers.
+    const m = doc?.meta && (typeof doc.meta.id === 'number' ? { ...doc.meta, id: String(doc.meta.id) } : doc.meta);
+    if (!m?.id || typeof m.id !== 'string' || typeof m.title !== 'string') {
       result.skipped++;
       continue;
     }
@@ -265,8 +275,10 @@ export async function importBackup(data) {
     await meta.put({ ...m, updatedAt: updatedAt || Date.now(), createdAt });
     await content.put({ id: m.id, json: doc.content?.json ?? null, html: doc.content?.html ?? '', settings: doc.content?.settings, comments: doc.content?.comments || {} });
     result[existing ? 'updated' : 'added']++;
+    if (existing) replaced.push(m.id);
   }
   await tx.done;
+  for (const id of replaced) announce({ type: 'saved', id, reason: 'backup' });
   return result;
 }
 

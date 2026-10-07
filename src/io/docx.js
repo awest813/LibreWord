@@ -185,10 +185,11 @@ class Converter {
         }
         let width = Number(n.attrs?.width) || img.width;
         let height = Number(n.attrs?.height) || Math.round((width / img.width) * img.height);
-        const maxW = this.geometry.contentWidth;
-        if (width > maxW) {
-          height = Math.round((height * maxW) / width);
-          width = maxW;
+        // Fit the text area, keeping the proportions, as the editor shows it.
+        const fit = Math.min(1, this.geometry.contentWidth / width, this.geometry.contentHeight / height);
+        if (fit < 1) {
+          width = Math.round(width * fit);
+          height = Math.round(height * fit);
         }
         out.push(new ImageRun({ type: img.type, data: img.bytes, transformation: { width, height }, altText: n.attrs?.alt ? { name: n.attrs.alt, description: n.attrs.alt, title: n.attrs.alt } : undefined }));
         continue;

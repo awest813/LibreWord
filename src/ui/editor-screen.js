@@ -35,6 +35,31 @@ const loadView = () => {
 const channel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('libreword') : null;
 const TAB_ID = Math.random().toString(36).slice(2);
 
+/*
+ * Edits not yet in IndexedDB when the page goes away (a reload or navigation
+ * within the 700 ms autosave delay) would be lost: IndexedDB writes started
+ * while a page unloads don't finish. So the unsaved state is also stashed in
+ * localStorage, which writes synchronously, and picked up on the next open if
+ * nothing newer was saved since.
+ */
+const PENDING_KEY = (id) => `lw:pending:${id}`;
+function takePending(id, storedAt) {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY(id));
+    if (!raw) return null;
+    localStorage.removeItem(PENDING_KEY(id));
+    const pending = JSON.parse(raw);
+    return pending?.json && pending.at > (storedAt || 0) ? pending : null;
+  } catch {
+    return null;
+  }
+}
+const dropPending = (id) => {
+  try {
+    localStorage.removeItem(PENDING_KEY(id));
+  } catch { /* storage unavailable */ }
+};
+
 /** Downscale very large images before embedding them in the document. */
 export async function imageFileToDataUrl(file, maxDim = 2000) {
   const raw = await new Promise((resolve, reject) => {
@@ -88,15 +113,16 @@ export class EditorScreen {
   async mount() {
     const doc = await getDoc(this.docId);
     if (!doc) return false;
-    this.title = doc.title;
-    this.settings = doc.settings;
+    const pending = takePending(this.docId, doc.updatedAt);
+    this.title = pending?.title ?? doc.title;
+    this.settings = pending?.settings ?? doc.settings;
     this.createdAt = doc.createdAt;
     this.savedAt = doc.updatedAt;
-    this.comments = doc.comments || {};
+    this.comments = pending?.comments ?? (doc.comments || {});
     // Link to a file on the device (Chromium): Save writes back to it.
     this.file = doc.file || null;
     // Persisted, so "unsaved changes to the file" survives reloads and "Don't Save".
-    this.fileDirty = Boolean(doc.file?.unsaved);
+    this.fileDirty = Boolean(doc.file?.unsaved || pending?.fileDirty);
     this.fileRev = 0; // bumped by every change the file should get
     // The state the document was opened in: saved to version history the
     // first time this session changes it.
@@ -105,9 +131,10 @@ export class EditorScreen {
     this.buildChrome();
     this.applyView();
 
+    let contentError = null;
     this.editor = createEditor({
       element: this.pageStack,
-      content: doc.json || sanitizeHtml(doc.html) || '<p></p>',
+      content: pending?.json || doc.json || sanitizeHtml(doc.html) || '<p></p>',
       getGeometry: () => (this.view.layout === 'print' ? this.geometry : null),
       onLayout: ({ pageCount }) => this.onLayout(pageCount),
       getPageOf: (pos) => this.pageOfPos(pos),
@@ -115,6 +142,7 @@ export class EditorScreen {
       onUpdate: ({ transaction }) => this.onDocChange(transaction),
       onSelectionUpdate: () => this.onSelectionChange(),
       onTransaction: () => this.scheduleUiUpdate(),
+      onContentError: ({ error }) => { contentError = error; },
       editorProps: {
         transformPastedHTML,
         handlePaste: (view, event) => {
@@ -191,7 +219,7 @@ export class EditorScreen {
     // changes that haven't been written to the linked file yet.
     const onBeforeUnload = (e) => {
       // Also warn when edits can't be stored: autosave paused by another tab, or the document deleted.
-      const unstored = (this.conflict && this.conflictDirty) || (this.docGone && this.saveState !== 'saved');
+      const unstored = (this.conflict && this.conflictDirty) || (this.docGone && this.saveState !== 'saved') || !this.stashPending();
       if (!unstored && (!this.fileDirty || this.leaveConfirmed)) return;
       e.preventDefault();
       e.returnValue = '';
@@ -199,8 +227,12 @@ export class EditorScreen {
     window.addEventListener('beforeunload', onBeforeUnload);
     this.cleanups.push(() => window.removeEventListener('beforeunload', onBeforeUnload));
 
-    const onHide = () => {
-      if (document.visibilityState === 'hidden') this.flush();
+    // pagehide comes before the page turns hidden on a reload, so don't wait for that.
+    const onHide = (e) => {
+      if (e.type === 'pagehide' || document.visibilityState === 'hidden') {
+        this.stashPending();
+        this.flush();
+      }
     };
     document.addEventListener('visibilitychange', onHide);
     window.addEventListener('pagehide', onHide);
@@ -224,6 +256,13 @@ export class EditorScreen {
 
     if (channel) {
       const onMsg = (e) => {
+        if (e.data?.type === 'renamed' && e.data.id === this.docId && !this.destroyed) {
+          // Renamed from the document list in another tab: adopt it, so the next save keeps it.
+          this.title = e.data.title;
+          this.titleInput.value = e.data.title;
+          this.updateTitle();
+          return;
+        }
         if (e.data?.type === 'saved' && e.data.id === this.docId && e.data.tab !== TAB_ID && !this.conflict && !this.destroyed) {
           // Pause autosave so this tab doesn't silently overwrite the other tab's changes.
           // Saving explicitly (or leaving the document) keeps this tab's version.
@@ -231,7 +270,9 @@ export class EditorScreen {
           // Only this tab's own unsaved edits are worth writing over the other tab's.
           this.conflictDirty = this.saveState !== 'saved';
           this.setSaveState('conflict');
-          toast('This document was changed in another tab. Reload to see those changes, or Save to keep yours.', {
+          toast(e.data.reason === 'backup'
+            ? 'This document was replaced by a restored backup. Reload to see it, or Save to keep the version open here.'
+            : 'This document was changed in another tab. Reload to see those changes, or Save to keep yours.', {
             timeout: 15000,
             action: { label: 'Reload', run: () => !this.destroyed && this.nav_.onOpenDoc(this.docId, { force: true }) },
           });
@@ -240,7 +281,36 @@ export class EditorScreen {
       channel.addEventListener('message', onMsg);
       this.cleanups.push(() => channel.removeEventListener('message', onMsg));
     }
+    if (contentError) {
+      // Probably saved by a newer LibreWord. Show what can be shown, but never
+      // save it: that would replace the real document with this partial view.
+      console.warn(contentError);
+      this.unreadable = true;
+      this.fileDirty = false; // nothing here can be saved, so don't ask to on leaving
+      this.editor.setEditable(false);
+      this.setSaveState('error');
+      toast('This document uses features this version of LibreWord can’t show, so it opened read-only. Reload to get the latest LibreWord, or restore an earlier version from File › Version History.', { type: 'error', timeout: 20000 });
+    } else if (pending) {
+      this.userEdited = true;
+      this.setSaveState('unsaved');
+      this.saveNow();
+      this.renderFileChip();
+      toast('Recovered changes made just before LibreWord last closed.', { type: 'success', timeout: 5000 });
+    }
     return true;
+  }
+
+  /** Keep unsaved edits in localStorage until autosave has written them (see takePending). */
+  stashPending() {
+    if (this.destroyed || !this.editor || this.saveState === 'saved' || this.conflict || this.docGone || this.unreadable) return true;
+    try {
+      localStorage.setItem(PENDING_KEY(this.docId), JSON.stringify({
+        at: Date.now(), json: this.editor.getJSON(), title: this.title, settings: this.settings, comments: this.comments, fileDirty: this.fileDirty,
+      }));
+      return true;
+    } catch {
+      return false; // too big for localStorage (large pictures): beforeunload warns instead
+    }
   }
 
   async destroy({ save = true } = {}) {
@@ -388,6 +458,8 @@ export class EditorScreen {
         el.style.width = `${g.width}px`;
         el.style.padding = `${g.margins.top}px ${g.margins.right}px ${g.margins.bottom}px ${g.margins.left}px`;
         el.style.minHeight = `${this.pageCount * (g.height + g.gap) - g.gap}px`;
+        // Pictures taller than a page are shown shrunk to fit one (document.css).
+        el.style.setProperty('--lw-content-height', `${g.contentHeight}px`);
       }
     } else {
       const avail = Math.max(320, (this.canvas.clientWidth - 48) / this.view.zoom);
@@ -396,6 +468,7 @@ export class EditorScreen {
         el.style.width = '100%';
         el.style.padding = `48px ${Math.max(24, Math.min(96, avail * 0.06))}px`;
         el.style.minHeight = `${Math.max(400, (this.canvas.clientHeight - 48) / this.view.zoom)}px`;
+        el.style.removeProperty('--lw-content-height');
       }
     }
     this.printStyle.textContent = printCss(this.settings);
@@ -584,7 +657,7 @@ export class EditorScreen {
 
   async saveNow(announce = false, { force = false } = {}) {
     this.queueSave.cancel();
-    if (this.destroyed || !this.editor) return;
+    if (this.destroyed || !this.editor || this.unreadable) return;
     if (this.conflict) {
       // Keep this tab's version only when asked to, and only if it has edits of its own;
       // an untouched tab is just stale and must not overwrite the other tab's work.
@@ -617,7 +690,10 @@ export class EditorScreen {
         else if (this.rev !== rev) {
           this.setSaveState('unsaved');
           this.queueSave();
-        } else this.setSaveState('saved');
+        } else {
+          this.setSaveState('saved');
+          dropPending(this.docId);
+        }
         this.savedAt = Date.now();
         this.maybeSnapshot();
         channel?.postMessage({ type: 'saved', id: this.docId, tab: TAB_ID });
@@ -663,8 +739,20 @@ export class EditorScreen {
   async restoreVersion(vid) {
     const v = await getVersion(vid);
     if (!v) return;
-    await this.flush();
-    await addVersion(this.docId, this.currentState('before-restore'));
+    if (this.unreadable) {
+      // Only a version this build can show lifts read-only mode.
+      try {
+        if (v.json) this.editor.schema.nodeFromJSON(v.json).check();
+      } catch {
+        toast('This version also uses features this version of LibreWord can’t show.', { type: 'error', timeout: 6000 });
+        return;
+      }
+      this.unreadable = false;
+      this.editor.setEditable(true);
+    } else {
+      await this.flush();
+      await addVersion(this.docId, this.currentState('before-restore'));
+    }
     this.comments = v.comments || {};
     this.settings = { ...this.settings, ...(v.settings || {}) };
     this.editor.commands.setContent(v.json || sanitizeHtml(v.html) || '<p></p>', { emitUpdate: true });
@@ -880,6 +968,7 @@ export class EditorScreen {
 
   /** Write the document to its linked file. Resolves true when the file is up to date. */
   async saveToFile() {
+    if (this.unreadable) return false;
     if (!this.file) return this.saveAs();
     if (this.fileSaving) return (await this.fileSaving) === true;
     // run() resolves true/false, or { saveAs } when the user chose to save elsewhere.
@@ -967,6 +1056,7 @@ export class EditorScreen {
    * System Access API, this downloads a .docx copy instead.
    */
   async saveAs({ format = this.file?.format || 'docx' } = {}) {
+    if (this.unreadable) return false;
     this.commitTitle();
     if (!canSaveToFiles()) {
       await this.exportAs('docx');

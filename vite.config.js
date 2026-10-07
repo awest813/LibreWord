@@ -13,7 +13,9 @@ export default defineConfig({
   },
   plugins: [
     VitePWA({
-      registerType: 'autoUpdate',
+      // A new version waits until the user agrees to reload (see main.js),
+      // instead of never applying while any LibreWord window is open.
+      registerType: 'prompt',
       injectRegister: false,
       includeAssets: ['favicon.svg', 'icons/*.png'],
       manifest: {
