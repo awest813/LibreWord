@@ -271,6 +271,7 @@ pre.diagnostics { max-height: 50vh; overflow: auto; font-size: 12px; white-space
 .style-card .sample { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #000; line-height: 1.2; font-family: Calibri, Carlito, 'Segoe UI', sans-serif; }
 /* Style previews always show ink on paper, like Word, so their colours stay legible in dark mode. */
 .style-card { background: #fff; }
+.style-card .sample::before { content: attr(data-sample); }
 .style-card .name { font-size: 10.5px; color: #605e5c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .style-more { width: 20px; border: 0; background: transparent; border-radius: 3px; display: grid; place-items: center; }
 .style-more:hover { background: var(--surface-hover); }
@@ -517,16 +518,22 @@ button.sb-item:hover { background: var(--surface-hover); }
 .start-inner { max-width: 1080px; margin: 0 auto; padding: 24px 32px 64px; }
 .start-section-title { display: flex; align-items: center; justify-content: space-between; margin: 24px 0 12px; }
 .start-section-title h2 { font-size: 18px; font-weight: 600; margin: 0; }
+.start-screen .app-name { margin: 0; font-size: 15px; font-weight: 700; }
 .template-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 16px; }
-.template-card { border: 0; background: transparent; padding: 0; text-align: left; display: flex; flex-direction: column; gap: 8px; }
+.template-tile { position: relative; display: flex; flex-direction: column; gap: 8px; }
+.template-card { border: 0; background: transparent; padding: 0; text-align: left; color: inherit; font: inherit; }
+/* The button's hit area and focus ring cover the whole tile, thumbnail included. */
+.template-card::after { content: ''; position: absolute; inset: 0; border-radius: 4px; }
+.template-card:focus-visible { outline: none; }
+.template-card:focus-visible::after { outline: 2px solid var(--focus); outline-offset: 2px; }
 .template-thumb {
   aspect-ratio: 8.5 / 11; background: #fff; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; position: relative;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); transition: border-color 0.1s, box-shadow 0.1s;
 }
-.template-card:hover .template-thumb, .template-card:focus-visible .template-thumb { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.template-tile:hover .template-thumb, .template-tile:has(.template-card:focus-visible) .template-thumb { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .template-thumb .thumb-doc { position: absolute; top: 0; left: 0; width: 816px; transform-origin: 0 0; pointer-events: none; padding: 72px; color: #000; }
 .template-card .label { font-size: 13px; }
-.template-card.is-import .template-thumb { display: grid; place-items: center; background: var(--surface); color: var(--text-muted); }
+.template-thumb.is-import { display: grid; place-items: center; background: var(--surface); color: var(--text-muted); }
 
 .doc-toolbar { display: flex; gap: 12px; align-items: center; }
 .doc-filter { display: flex; align-items: center; gap: 6px; border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 10px; height: 32px; background: var(--surface); width: 260px; }
@@ -646,7 +653,7 @@ kbd { font: 12px var(--font-ui); background: var(--surface-2); border: 1px solid
   .doc-filter { width: 100%; }
   .template-row { grid-template-columns: repeat(3, 1fr); gap: 10px; }
   .template-card .label { font-size: 12px; }
-  .template-card.is-import .template-thumb span { display: none; }
+  .template-thumb.is-import span { display: none; }
   .canvas .ruler { display: none; }
   .canvas .canvas-inner { padding-top: 12px; }
   .doc-table .col-date { display: none; }

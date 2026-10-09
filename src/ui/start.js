@@ -6,10 +6,17 @@ import { sanitizeHtml, IMPORT_ACCEPT } from '../io/import.js';
 import { confirmDialog, promptDialog } from './dialog.js';
 import { onInstallable, promptInstall } from './install.js';
 
+/**
+ * A template tile: the thumbnail is a picture, so it sits beside the button
+ * rather than in it (screen readers and voice control get just the name); the
+ * button still covers the whole tile (see .template-card::after).
+ */
+const tile = (thumb, button) => h('div', { class: 'template-tile' }, thumb, button);
+
 export function templateCards({ onTemplate, onImport }) {
   const row = h('div', { class: 'template-row' });
   for (const t of TEMPLATES) {
-    const thumb = h('div', { class: 'template-thumb' });
+    const thumb = h('div', { class: 'template-thumb', 'aria-hidden': 'true' });
     const docEl = h('div', { class: 'thumb-doc lw-document', html: sanitizeHtml(t.html()) });
     thumb.append(docEl);
     // Scale the 816px-wide page down to the thumbnail width once it is laid out.
@@ -17,17 +24,13 @@ export function templateCards({ onTemplate, onImport }) {
       const w = thumb.clientWidth || 148;
       docEl.style.transform = `scale(${w / 816})`;
     });
-    row.append(
-      h('button', { type: 'button', class: 'template-card', onclick: () => onTemplate(t), 'aria-label': `New ${t.name}` }, thumb, h('span', { class: 'label' }, t.name)),
-    );
+    row.append(tile(thumb, h('button', { type: 'button', class: 'template-card', onclick: () => onTemplate(t), 'aria-label': `New ${t.name}` }, h('span', { class: 'label' }, t.name))));
   }
   if (onImport) {
     row.append(
-      h(
-        'button',
-        { type: 'button', class: 'template-card is-import', onclick: onImport, 'aria-label': 'Open a file from your device' },
-        h('div', { class: 'template-thumb', html: `<div style="display:grid;justify-items:center;gap:8px">${icon('upload', 'icon icon-lg')}<span class="import-formats">Word, OpenDocument, RTF, text, Markdown</span></div>` }),
-        h('span', { class: 'label' }, 'Open from device…'),
+      tile(
+        h('div', { class: 'template-thumb is-import', 'aria-hidden': 'true', html: `<div style="display:grid;justify-items:center;gap:8px">${icon('upload', 'icon icon-lg')}<span class="import-formats">Word, OpenDocument, RTF, text, Markdown</span></div>` }),
+        h('button', { type: 'button', class: 'template-card is-import', onclick: onImport, 'aria-description': 'Word, OpenDocument, RTF, text or Markdown' }, h('span', { class: 'label' }, 'Open from device…')),
       ),
     );
   }
@@ -167,6 +170,8 @@ export function documentList({ onOpen, compact = false, currentId = null, onRena
   return { el: wrap, refresh };
 }
 
+let unsubscribeInstall = null;
+
 export function renderStartScreen(root, { onOpen, onTemplate, onImport, onToggleTheme }) {
   const list = documentList({ onOpen });
   // Shown only when the browser says LibreWord can be installed (Chrome, Edge, Chromebooks).
@@ -183,7 +188,7 @@ export function renderStartScreen(root, { onOpen, onTemplate, onImport, onToggle
       'header',
       { class: 'titlebar' },
       h('span', { class: 'app-logo', html: '<svg width="26" height="26" viewBox="0 0 48 48" aria-hidden="true"><rect width="48" height="48" rx="10" fill="#fff"/><path d="M12 14h4.2l3.3 14.4L23.2 14h3.6l3.7 14.4L33.8 14H38l-5.6 20h-3.9L25 20.6 21.5 34h-3.9z" fill="#185abd"/></svg>' }),
-      h('strong', { style: { fontSize: '15px' } }, 'LibreWord'),
+      h('h1', { class: 'app-name' }, 'LibreWord'),
       h('div', { style: { flex: 1 } }),
       h('div', { class: 'titlebar-right' }, installBtn, h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Toggle dark mode', title: 'Toggle dark mode', html: icon('moon'), onclick: onToggleTheme })),
     ),
@@ -200,9 +205,10 @@ export function renderStartScreen(root, { onOpen, onTemplate, onImport, onToggle
     ),
   );
   root.replaceChildren(screen);
-  const unsubscribe = onInstallable((can) => {
-    if (!installBtn.isConnected) unsubscribe?.();
-    else installBtn.hidden = !can;
+  // The previous start screen is gone: stop updating its button (and keeping it in memory).
+  unsubscribeInstall?.();
+  unsubscribeInstall = onInstallable((can) => {
+    installBtn.hidden = !can;
   });
   return { refresh: list.refresh };
 }

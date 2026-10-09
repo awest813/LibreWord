@@ -242,6 +242,27 @@ await test('reopening a file that changed on disk refreshes the same document', 
   assert.equal(await page.$$eval('.doc-row', (r) => r.length), rows);
 });
 
+await test('reopening a changed file while it is open shows the new version and keeps it', async () => {
+  const launch = (name) => page.evaluate(async (n) => {
+    const dir = await navigator.storage.getDirectory();
+    await window.__launch({ files: [await dir.getFileHandle(n)] });
+  }, name);
+  await launch('report.docx');
+  await page.waitForFunction(() => { const ed = window.libreword?.editor; return ed && !ed.isDestroyed && ed.getText().includes('Edited in Word'); });
+  const id = await page.evaluate(() => window.libreword.screen.docId);
+  await page.waitForTimeout(1100);
+  const changed = await Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph({ children: [new TextRun('Edited again elsewhere')] })] }] }));
+  await putFile('report.docx', changed);
+  await launch('report.docx');
+  await page.waitForFunction(() => { const ed = window.libreword?.editor; return ed && !ed.isDestroyed && ed.getText().includes('Edited again elsewhere'); });
+  assert.equal(await page.evaluate(() => window.libreword.screen.docId), id);
+  // The editor that showed the old version must not save it over the reload.
+  await page.waitForTimeout(1000);
+  await page.reload();
+  await page.waitForFunction(() => { const ed = window.libreword?.editor; return ed && !ed.isDestroyed && ed.getText().length > 0; });
+  assert.match(await page.evaluate(() => window.libreword.editor.getText()), /Edited again elsewhere/);
+});
+
 await test('Ctrl+O on the start screen opens a file', async () => {
   await page.click('.app-logo');
   await page.waitForSelector('.template-card');

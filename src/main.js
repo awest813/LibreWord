@@ -31,13 +31,20 @@ async function newFromTemplate(t) {
  * document id, or null if the file couldn't be read.
  */
 async function importAndOpen(file, handle = null, { show = true } = {}) {
+  let dropped = false;
   const open = (id) => {
     if (show) go(`#/doc/${encodeURIComponent(id)}`);
+    else if (dropped) route(); // the document on screen was reloaded behind it: show it again
     return id;
   };
   try {
     const format = handle ? formatOfName(file.name) : null;
-    const existing = handle && format ? await findDocByFile(handle) : null;
+    let existing = handle && format ? await findDocByFile(handle) : null;
+    if (existing && screen?.docId === existing.id) {
+      // It's open here: store the editor's pending edits first, so `unsaved` is current.
+      await screen.flush();
+      existing = await findDocByFile(handle);
+    }
     if (existing && Math.abs((existing.file.lastModified || 0) - file.lastModified) < 1000) {
       // Re-opening a file we already have, unchanged on disk: reuse that
       // document (it keeps comments, history and anything the file format
@@ -52,12 +59,14 @@ async function importAndOpen(file, handle = null, { show = true } = {}) {
       const old = await getDoc(existing.id);
       await addVersion(existing.id, { title: old.title, json: old.json, html: old.html, settings: old.settings, comments: old.comments, words: old.words, reason: 'before-reload' });
       await saveDoc(existing.id, { html, settings: { ...old.settings, ...settings }, comments: comments || {}, file: link });
+      dropped = await dropOpenCopy(existing.id);
       toast(`Reloaded “${file.name}”, which changed on disk`, { type: 'success' });
       return open(existing.id);
     }
     if (existing) {
       // Both changed: keep our unsaved version as its own document, and link the file to a fresh import.
       await saveDoc(existing.id, { file: null, title: `${existing.title} (unsaved changes)` });
+      dropped = await dropOpenCopy(existing.id);
       toast(`“${file.name}” changed on disk. Your unsaved version was kept as “${existing.title} (unsaved changes)”.`, { timeout: 7000 });
     }
     const id = await createDoc({ title, html, settings: settings || {}, comments: comments || {}, file: link });
@@ -71,6 +80,20 @@ async function importAndOpen(file, handle = null, { show = true } = {}) {
     toast(`${file.name}: ${err.message || 'Could not open that file.'}`, { type: 'error', timeout: 6000 });
     return null;
   }
+}
+
+/**
+ * After changing a document in storage behind the open editor's back, close
+ * that editor without saving its stale copy over the change (opening the
+ * document again then shows what was stored).
+ */
+async function dropOpenCopy(id) {
+  if (screen?.docId !== id) return false;
+  const stale = screen;
+  screen = null;
+  window.libreword = null;
+  await stale.destroy({ save: false });
+  return true;
 }
 
 /** What opening a file did: linked to it, or opened as a copy (and why). */
@@ -109,12 +132,9 @@ async function showEditor(id) {
     docId: id,
     onHome: () => go('#/'),
     onOpenDoc: (docId, { force } = {}) => {
-      if (force && docId === screen?.docId) {
-        // Reload from storage without saving the stale copy over it.
-        const stale = screen;
-        screen = null;
-        stale.destroy({ save: false }).then(route);
-      } else go(`#/doc/${encodeURIComponent(docId)}`);
+      // Reload from storage without saving the stale copy over it.
+      if (force && docId === screen?.docId) dropOpenCopy(docId).then(route);
+      else go(`#/doc/${encodeURIComponent(docId)}`);
     },
     onNewDoc: newFromTemplate,
     onImport: importAndOpen,
@@ -148,6 +168,7 @@ function route() {
     if (screen) {
       await screen.destroy();
       screen = null;
+      window.libreword = null;
     }
     root.removeAttribute('aria-busy');
     if (m && !id) {
@@ -176,7 +197,10 @@ window.addEventListener('libreword:db-blocked', () => {
 });
 
 syncThemeColor();
-matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', syncThemeColor);
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
+  syncThemeColor();
+  screen?.ruler.render(); // drawn on a canvas, in the theme's colours
+});
 
 window.addEventListener('hashchange', route);
 route();

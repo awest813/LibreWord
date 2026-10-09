@@ -283,7 +283,8 @@ export class Ribbon {
       const c = h(
         'button',
         { type: 'button', class: 'style-card', role: inList ? 'option' : null, title: s.name, 'aria-label': s.name, 'data-style': s.id },
-        h('span', { class: 'sample', style: s.css }, s.sample),
+        // Drawn by CSS (::before), so the preview isn't read out or counted as the card's label.
+        h('span', { class: 'sample', style: s.css, 'data-sample': s.sample }),
         h('span', { class: 'name' }, s.name),
       );
       c.addEventListener('mousedown', (e) => e.preventDefault());

@@ -316,7 +316,11 @@ export class EditorScreen {
   async destroy({ save = true } = {}) {
     if (this.destroyed) return;
     // Leaving keeps this tab's version, even over another tab's changes.
-    if (save) await this.flush({ force: true });
+    if (save) {
+      await this.flush({ force: true });
+      // Autosave failing (storage full…): keep the edits for the next time the document opens.
+      this.stashPending();
+    }
     this.destroyed = true;
     this.closeBackstage?.();
     if (this.speaking) speechSynthesis.cancel();
@@ -1109,7 +1113,19 @@ export class EditorScreen {
    * leaves the file as it is; the changes stay in LibreWord, still marked unsaved.
    */
   async confirmLeave() {
-    if (this.leaveConfirmed || this.destroyed || !this.fileDirty || !this.file) return true;
+    if (this.leaveConfirmed || this.destroyed) return true;
+    if (this.saveState === 'error' && !this.docGone && !this.stashPending()) {
+      const leave = await openDialog({
+        title: 'Changes not saved',
+        body: h('p', {}, 'LibreWord couldn’t store your latest changes, so leaving now loses them. Stay and use File › Save a Copy to keep them.'),
+        buttons: [
+          { label: 'Leave Anyway', value: true },
+          { label: 'Stay', value: false, primary: true },
+        ],
+      });
+      if (!leave) return false;
+    }
+    if (!this.fileDirty || !this.file) return true;
     const choice = await openDialog({
       title: 'Save changes?',
       body: h('p', {}, `Do you want to save your changes to “${this.file.name}”? Either way they stay in LibreWord.`),
@@ -1506,7 +1522,7 @@ export class EditorScreen {
       s: () => (e.shiftKey ? this.saveAs() : this.save()),
       p: () => this.print(),
       f: () => (e.shiftKey ? null : this.openFind(false)),
-      h: () => this.openFind(true),
+      h: () => (e.shiftKey ? null : this.openFind(true)), // Ctrl+Shift+H is highlight
       k: () => this.editLink(),
       o: () => this.openBackstage('open'),
       g: () => (e.shiftKey ? this.wordCountDialog() : this.goToPageDialog()),

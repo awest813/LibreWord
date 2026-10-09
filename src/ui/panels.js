@@ -121,6 +121,15 @@ export class FindPanel {
     this.app.editor.commands.setSearch(this.findInput.value, { ...this.options });
   }
 
+  /** The search state for what's in this panel (the navigation pane shares it and may have searched for something else). */
+  ownSearch() {
+    const s = searchKey.getState(this.app.editor.state);
+    const same = s.term === this.findInput.value && Object.keys(this.options).every((k) => Boolean(s.options?.[k]) === Boolean(this.options[k]));
+    if (same) return s;
+    this.search();
+    return searchKey.getState(this.app.editor.state);
+  }
+
   renderCount(s) {
     if (!s.term) {
       this.count.textContent = '';
@@ -136,7 +145,7 @@ export class FindPanel {
 
   replace() {
     const ed = this.app.editor;
-    const s = searchKey.getState(ed.state);
+    const s = this.ownSearch();
     if (!s.results.length) return;
     const cur = s.results[s.current];
     // Replace only once the current match is selected (like Word), otherwise select it first.
@@ -174,7 +183,7 @@ export class FindPanel {
   }
 
   replaceAll() {
-    let n = searchKey.getState(this.app.editor.state).results.length;
+    let n = this.ownSearch().results.length;
     // The command returns the real count, which can exceed the highlighted matches.
     if (n) n = Number(this.app.editor.commands.replaceAll(this.replaceInput.value)) || n;
     this.app.toast(n ? `Replaced ${n} occurrence${n === 1 ? '' : 's'}.` : 'Nothing to replace.');

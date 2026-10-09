@@ -190,6 +190,35 @@ await test('find and replace all', async () => {
   await page.waitForFunction(() => window.libreword.editor.isFocused);
 });
 
+await test('replace uses the find box, not a navigation pane search', async () => {
+  await page.evaluate(() => window.libreword.editor.commands.setContent('<p>cat dog cat bird</p>'));
+  await page.keyboard.press('Control+h');
+  await page.fill('.find-panel input[aria-label="Find"]', 'cat');
+  await page.fill('.find-panel input[aria-label="Replace with"]', 'fox');
+  await page.waitForFunction(() => document.querySelector('.find-count')?.textContent.trim() === '1 of 2');
+  // The navigation pane shares the highlighted search; searching there must not redirect Replace All.
+  await page.evaluate(() => window.libreword.screen.toggleNav(true));
+  await page.fill('.nav-pane input[type="search"]', 'dog');
+  await page.waitForFunction(() => document.querySelector('.find-count')?.textContent.trim() === '1 of 1');
+  await page.click('.find-panel button:has-text("All")');
+  assert.equal(await page.evaluate(() => window.libreword.editor.getText()), 'fox dog fox bird');
+  await page.evaluate(() => window.libreword.screen.toggleNav(false));
+  await page.click('.find-panel button[aria-label="Close (Esc)"]');
+  await page.waitForFunction(() => window.libreword.editor.isFocused);
+});
+
+await test('Ctrl+Shift+H highlights instead of opening Replace', async () => {
+  await page.evaluate(() => {
+    const ed = window.libreword.editor;
+    ed.commands.setContent('<p>mark me</p>');
+    ed.commands.focus();
+    ed.commands.setTextSelection({ from: 1, to: 5 });
+  });
+  await page.keyboard.press('Control+Shift+h');
+  assert.ok(await page.evaluate(() => window.libreword.editor.isActive('highlight')));
+  assert.ok(await page.isHidden('.find-panel'));
+});
+
 await test('documents persist across reloads', async () => {
   await page.evaluate(() => window.libreword.editor.commands.setContent('<p>Persistent content 12345</p>'));
   await page.fill('.doc-title-input', 'Persistence test');
