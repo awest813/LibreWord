@@ -53,7 +53,11 @@ function inline(nodes = []) {
       t = lead + c + trail;
     }
     const link = marks.find((m) => m.type === 'link');
-    if (link) t = `[${t}](${destination(link.attrs.href)})`;
+    if (link) {
+      t = `[${t}](${destination(link.attrs.href)})`;
+      // "Wow!" before a link would make it an image: "![…](…)".
+      if (out.endsWith('!')) out = `${out.slice(0, -1)}\\!`;
+    }
     out += t;
   }
   return out;
@@ -81,7 +85,8 @@ function table(node) {
 function block(node, ctx) {
   switch (node.type) {
     case 'paragraph':
-      return inline(node.content);
+      // Leading spaces as entities: four of them would start a code block.
+      return inline(node.content).replace(/^[ \t]+/, (ws) => ws.replace(/ /g, '&#32;').replace(/\t/g, '&#9;'));
     case 'heading':
       return `${'#'.repeat(node.attrs?.level || 1)} ${inline(node.content)}`;
     case 'blockquote':

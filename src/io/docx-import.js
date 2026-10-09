@@ -493,7 +493,7 @@ class DocxReader {
       if (f.after != null && Math.abs(f.after - 8) > 0.01) css.push(`margin-bottom: ${f.after}pt`);
       const listed = props.numId && this.numbering.exists(props.numId);
       // LibreWord exports checklists as ☐/☒ paragraphs; turn them back into checklists.
-      const task = !level && /^(<[^>]+>)*[☐☒]\s/.test(content) ? { checked: content.includes('☒') } : null;
+      const task = !level && /^(<[^>]+>)*[☐☒]\s/.test(content) ? { checked: /^(<[^>]+>)*☒/.test(content) } : null;
       if (!listed && !task && f.indent > 0) css.push(`margin-left: ${Math.round(f.indent)}px`);
       if (!listed && !task && f.firstLine) css.push(`text-indent: ${Math.round(f.firstLine)}px`);
       const style = css.length ? ` style="${css.join('; ')}"` : '';

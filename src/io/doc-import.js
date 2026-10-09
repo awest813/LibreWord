@@ -625,15 +625,17 @@ class DocReader {
   readParagraphs() {
     const { wd, pieces, ccpText, chpRuns, papRuns, sections } = this;
     const paras = [];
-    const fields = []; // open fields: { instr, sep, href }
+    const fields = []; // open fields: { instr, sep, href, outer } (outer: the enclosing link)
+    let unseparated = 0; // open fields still in their instruction text
     let segs = [];
     let cur = null;
     // Every character comes from the WordDocument stream, so a sane piece
     // table never yields more characters than it has bytes.
     let budget = wd.length;
+    // Constant time per character, however deeply (or maliciously) fields nest.
     const link = () => {
-      for (let i = fields.length - 1; i >= 0; i--) if (fields[i].href) return fields[i].href;
-      return null;
+      const f = fields[fields.length - 1];
+      return f ? f.href || f.outer : null;
     };
     const end = (fc, endChar) => {
       paras.push({ segs, papx: papRuns.find(fc), endChar });
@@ -656,7 +658,8 @@ class DocReader {
           continue;
         }
         if (code === 0x13) {
-          fields.push({ instr: '', sep: false, href: null });
+          fields.push({ instr: '', sep: false, href: null, outer: link() });
+          unseparated++;
           continue;
         }
         if (code === 0x14 || code === 0x15) {
@@ -664,12 +667,13 @@ class DocReader {
           if (f && code === 0x14 && !f.sep) {
             f.sep = true;
             f.href = hyperlinkTarget(f.instr);
+            unseparated--;
           }
-          if (code === 0x15) fields.pop();
+          if (code === 0x15 && fields.pop()?.sep === false) unseparated--;
           cur = null;
           continue;
         }
-        if (fields.some((f) => !f.sep)) {
+        if (unseparated) {
           // Field instruction text: hidden; collected for the innermost field.
           const f = fields[fields.length - 1];
           if (!f.sep) f.instr += String.fromCharCode(code);

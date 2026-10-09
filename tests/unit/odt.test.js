@@ -133,6 +133,29 @@ describe('.odt writer → reader', () => {
     expect(JSON.stringify(r.json.content[8])).toContain(`"id":"${comment.id}"`);
   });
 
+  it('saves a re-opened checklist again (one margin, not a duplicate attribute) and reads ☒ only as a leading box', async () => {
+    const task = (checked, text) => ({ type: 'taskItem', attrs: { checked }, content: [p(t(text))] });
+    const once = (await roundTrip(doc({ type: 'taskList', content: [task(true, 'done'), task(false, 'todo')] }))).json;
+    const twice = (await roundTrip(once)).json;
+    expect(twice.content[0].type).toBe('taskList');
+    expect(twice.content[0].content.map((i) => i.attrs.checked)).toEqual([true, false]);
+    // An indented checklist paragraph used to get fo:margin-left twice: invalid XML.
+    const indented = doc({ type: 'taskList', content: [{ type: 'taskItem', attrs: { checked: false }, content: [{ type: 'paragraph', attrs: { indent: 24 }, content: [t('x')] }] }] });
+    await expect(roundTrip(indented)).resolves.toBeTruthy();
+    const { json: boxes } = await roundTrip(doc(p(t('☐ Buy ☒ boxes'))));
+    expect(boxes.content[0].type).toBe('taskList');
+    expect(boxes.content[0].content[0].attrs.checked).toBe(false);
+  });
+
+  it('caps runs of spaces in preformatted text instead of failing', async () => {
+    const zip = await JSZip.loadAsync(await writeOdt(doc({ type: 'codeBlock', content: [t('a  b')] }), DEFAULT_SETTINGS, {}));
+    const xml = (await zip.file('content.xml').async('string')).replace(/<text:s text:c="\d+"\/>|<text:s\/>/, '<text:s text:c="999999999"/>');
+    expect(xml).toContain('999999999');
+    zip.file('content.xml', xml);
+    const r = await readOdt(await zip.generateAsync({ type: 'arraybuffer' }));
+    expect(r.html.length).toBeLessThan(10000);
+  });
+
   it('writes a valid package: mimetype first and stored, manifest lists every part', async () => {
     const bytes = await writeOdt(doc(p(t('x'))), DEFAULT_SETTINGS, {});
     expect(new TextDecoder().decode(bytes.slice(30, 38))).toBe('mimetype');

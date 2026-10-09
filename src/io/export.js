@@ -122,7 +122,8 @@ export function printDocument(title) {
   }, 500);
 }
 
-const cssString = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ')}"`;
+// Control characters as spaces: CSS turns \r and \f into newlines, which end a string and would let the rest of a header or footer escape into the stylesheet.
+const cssString = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[\x00-\x1f\x7f]+/g, ' ')}"`;
 
 export function printCss(settings) {
   const g = pageGeometry(settings);

@@ -299,10 +299,12 @@ class OdtReader {
       return { code: el.textContent.replace(/[\n\r]+/g, ' '), codeRaw: this.codeText(el), before, after };
     }
 
+    // LibreWord writes checklists as ☐/☒ paragraphs; read them back as checklists.
+    const task = !inList && !level && /^(<[^>]+>)*[☐☒]\s/.test(content) ? { checked: /^(<[^>]+>)*☒/.test(content) } : null;
     const css = [];
     const align = { start: 'left', left: 'left', center: 'center', end: 'right', right: 'right', justify: 'justify' }[direct['fo:text-align'] || (level ? null : all['fo:text-align'])];
     if (align && align !== 'left') css.push(`text-align: ${align}`);
-    if (!inList) {
+    if (!inList && !task) {
       const ml = toPx(direct['fo:margin-left']);
       if (ml > 1) css.push(`margin-left: ${Math.round(ml)}px`);
       const ti = toPx(direct['fo:text-indent']);
@@ -313,8 +315,6 @@ class OdtReader {
     const style = css.length ? ` style="${css.join('; ')}"` : '';
     const named = Object.entries(NAMED_PARAGRAPHS).find(([n]) => names.includes(n))?.[1];
     if (level) return { html: `${before}<h${Math.min(6, level)}${style}>${content}</h${Math.min(6, level)}>${after}` };
-    // LibreWord writes checklists as ☐/☒ paragraphs; read them back as checklists.
-    const task = !inList && /^(<[^>]+>)*[☐☒]\s/.test(content) ? { checked: content.includes('☒') } : null;
     if (task) content = content.replace(/[☐☒]\s/, '');
     const dataStyle = named && !inList ? ` data-style="${named}"` : '';
     return { html: `${before}<p${dataStyle}${style}>${content}</p>${after}`, task };
@@ -326,7 +326,7 @@ class OdtReader {
     for (const node of el.childNodes) {
       if (node.nodeType === 3) out += node.nodeValue.replace(/[\n\r]+/g, '');
       else if (node.nodeType === 1) {
-        if (is(node, 'text', 's')) out += ' '.repeat(Number(attr(node, 'text', 'c')) || 1);
+        if (is(node, 'text', 's')) out += ' '.repeat(Math.min(1000, Number(attr(node, 'text', 'c')) || 1));
         else if (is(node, 'text', 'tab')) out += '\t';
         else if (is(node, 'text', 'line-break')) out += '\n';
         else if (!is(node, 'office', 'annotation')) out += this.codeText(node);
@@ -723,7 +723,9 @@ class OdtWriter {
   paragraphStyle(attrs = {}, parent = 'Standard', { level = null } = {}) {
     const p = [];
     if (attrs.textAlign && attrs.textAlign !== 'left') p.push(`fo:text-align="${attrs.textAlign === 'justify' ? 'justify' : attrs.textAlign === 'center' ? 'center' : 'end'}"`);
-    if (attrs.indent) p.push(`fo:margin-left="${inches(attrs.indent)}"`);
+    // A checklist item's own indent comes on top of its nesting level (one fo:margin-left: a second would make the XML invalid).
+    const left = (attrs.indent || 0) + (level != null ? 24 + 24 * level : 0);
+    if (left) p.push(`fo:margin-left="${inches(left)}"`);
     if (attrs.firstLineIndent) p.push(`fo:text-indent="${inches(attrs.firstLineIndent)}"`);
     if (attrs.spaceBefore != null) p.push(`fo:margin-top="${attrs.spaceBefore}pt"`);
     if (attrs.spaceAfter != null) p.push(`fo:margin-bottom="${attrs.spaceAfter}pt"`);
@@ -732,7 +734,6 @@ class OdtWriter {
       p.push('fo:break-before="page"');
       this.pendingBreak = false;
     }
-    if (level != null) p.push(`fo:margin-left="${inches(24 + 24 * level)}"`);
     if (!p.length) return parent;
     return this.auto.get('paragraph', 'P', parent, `<style:paragraph-properties ${p.join(' ')}/>`);
   }

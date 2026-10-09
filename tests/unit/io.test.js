@@ -9,6 +9,7 @@ import { rtfToText, textToHtml, sanitizeHtml, markdownToHtml } from '../../src/i
 import { cssLengthToPx, parseLineHeight } from '../../src/editor/paragraph-format.js';
 import { buildRegExp, findMatches } from '../../src/editor/search.js';
 import { DEFAULT_SETTINGS } from '../../src/storage/db.js';
+import { printCss } from '../../src/io/export.js';
 
 const schema = getSchema(buildExtensions());
 const p = (...content) => ({ type: 'paragraph', content });
@@ -58,6 +59,13 @@ describe('markdown export', () => {
   it('serializes code blocks and quotes', () => {
     expect(md).toContain('```js\nlet x = 1;\nx++;\n```');
     expect(md).toContain('> quoted');
+  });
+  it('keeps a link after "!" as a link, and indented paragraphs out of code blocks', async () => {
+    const md = jsonToMarkdown({ type: 'doc', content: [p(t('Wow!'), t('site', [{ type: 'link', attrs: { href: 'https://example.com' } }])), p(t('    four spaces'))] });
+    const html = await markdownToHtml(md);
+    expect(html).not.toContain('<img');
+    expect(html).toContain('<a href="https://example.com"');
+    expect(html).not.toContain('<code>');
   });
   it('escapes markdown control characters in text', () => {
     expect(jsonToMarkdown({ type: 'doc', content: [p(t('2 * 3 = [6]'))] })).toBe('2 \\* 3 = \\[6\\]\n');
@@ -380,5 +388,13 @@ describe('io regressions', async () => {
     expect(rtfToText(rtf)).toBe('It\u2019s \u201cq\u201d\u00a0x \u201cy');
     const sjis = `{${bs}rtf1${bs}ansi${bs}ansicpg932 ${bs}'82${bs}'a0}`;
     expect(rtfToText(sjis)).toBe('\u3042');
+  });
+});
+
+describe('print CSS', () => {
+  it('keeps header and footer text inside its CSS string', () => {
+    const css = printCss({ ...DEFAULT_SETTINGS, header: 'Acme\r}} body{display:none}', footer: 'x\fy' });
+    expect(css).not.toMatch(/[\r\f]/);
+    expect(css).toContain('content: "Acme }} body{display:none}"');
   });
 });
